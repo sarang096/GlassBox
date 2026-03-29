@@ -227,3 +227,43 @@ Example: `SecurePass123!`
 
 **Happy coding! 🎉**
 
+---
+
+# n8n + ngrok Docker Cheatsheet
+
+## 🚀 Daily Operations
+
+Navigate to your folder and boot the stack in the background:
+
+```bash
+cd C:\Users\sigin\OneDrive\Desktop\N8n
+docker compose up -d
+```
+
+Kill the containers when you're done for the day:
+
+```bash
+docker compose down
+```
+
+> **Note:** We setup volumes to store the container data. Even if we run `docker compose down` and delete the containers, the persisted storage unit of that container keeps the data intact for the next run.
+
+## 🐛 Debugging & Logs
+
+Check why a specific container is crashing or acting up:
+
+```bash
+docker compose logs <container_name> # e.g., ngrok or n8n
+```
+
+Find the exact startup URL or check if the UI is ready:
+
+```bash
+docker compose logs n8n
+```
+
+## ⚠️ Common Traps
+
+- **The ngrok Free Tier Limit:** You only get **1 active tunnel** at a time. If the ngrok container crashes with a session limit error, it means you left an old ngrok terminal window open somewhere else. Kill any manual CLI sessions before running `docker compose up -d`.
+
+- **Ollama:** This is the URL that the ollama node must connect to because it is running on the local host. Since n8n is running inside the docker container, it wouldn't know where the host machine is without using the special internal router: `http://host.docker.internal:11434`
