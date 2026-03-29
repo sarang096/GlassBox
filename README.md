@@ -1,6 +1,6 @@
-# GroupHub - Workspace Collaboration Platform
+# glassBox - Workspace Collaboration Platform
 
-A secure, modern platform for teams to collaborate on coding challenges, tests, and projects. GroupHub allows admins to create groups, define custom fields for members, and share file templates with real-time editing capabilities.
+A secure, modern platform for teams to collaborate on coding challenges, tests, and projects. glassBox allows admins to create groups, define custom fields for members, and share file templates with real-time editing capabilities.
 
 ## 🎯 Features
 
@@ -32,7 +32,7 @@ A secure, modern platform for teams to collaborate on coding challenges, tests, 
 ## 🏗️ Architecture
 
 ```
-GroupHub/
+glassBox/
 ├── backend/                 # FastAPI server
 │   ├── main.py            # App initialization & middleware
 │   ├── auth.py            # Authentication utilities
@@ -253,7 +253,7 @@ npm test
 ### Backend (.env)
 ```
 SECRET_KEY=your-secret-key-here
-DATABASE_URL=sqlite:///./grouphub.db
+DATABASE_URL=sqlite:///./glassBox.db
 CORS_ORIGINS=http://localhost:3000
 ACCESS_TOKEN_EXPIRE_MINUTES=60
 LOG_LEVEL=INFO
