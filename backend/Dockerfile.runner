@@ -10,6 +10,20 @@ RUN apt-get update && \
 # Pre-install common Python test dependencies for faster execution
 RUN pip install --no-cache-dir pytest flask flask-cors
 
+# Pre-install Jest and Babel globally so frontend tests work offline
+# (containers run with network_mode=none, so npm install at runtime fails)
+RUN npm install -g \
+    jest \
+    babel-jest \
+    @babel/core \
+    @babel/preset-env \
+    @babel/preset-react \
+    jest-environment-jsdom \
+    @testing-library/react \
+    @testing-library/jest-dom \
+    react \
+    react-dom
+
 WORKDIR /workspace
 
 # Default command — overridden at runtime

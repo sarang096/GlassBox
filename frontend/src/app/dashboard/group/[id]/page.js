@@ -141,7 +141,7 @@ function AddFileModal({ onClose, onCreated, groupId, isAdmin }) {
 }
 
 // ─── AI Mode Constants ───
-const N8N_WEBHOOK_BASE = 'https://virgil-uncaricatured-tena.ngrok-free.dev/webhook-test/ai-path';
+const N8N_WEBHOOK_BASE = 'http://localhost:5678/webhook-test/ai-path';
 function getN8nWebhookUrl(groupId) {
   return `${N8N_WEBHOOK_BASE}`;
 }

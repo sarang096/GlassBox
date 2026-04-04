@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth';
+import { Hexagon, LogOut } from 'lucide-react';
 
 export default function Navbar() {
   const { user, logout } = useAuth();
@@ -10,7 +11,7 @@ export default function Navbar() {
     <nav className="navbar" id="main-navbar">
       <div className="navbar-inner">
         <Link href={user ? '/dashboard' : '/'} className="navbar-logo">
-          <span className="navbar-logo-icon">⬡</span>
+          <span className="navbar-logo-icon"><Hexagon size={18} strokeWidth={2.5} /></span>
           GroupHub
         </Link>
 
@@ -23,8 +24,8 @@ export default function Navbar() {
                 </div>
                 <span className="navbar-username">{user.username}</span>
               </div>
-              <button className="btn btn-ghost btn-sm" onClick={logout} id="logout-btn">
-                Logout
+              <button className="btn btn-ghost btn-sm" onClick={logout} id="logout-btn" style={{ padding: '6px 10px' }} title="Logout">
+                <LogOut size={16} />
               </button>
             </>
           ) : (

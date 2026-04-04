@@ -320,9 +320,22 @@ class ApiClient {
     if (!Number.isInteger(groupId) || groupId <= 0) {
       throw new Error('Invalid group ID');
     }
-    return this.request(`/groups/${groupId}/execute`, {
-      method: 'POST',
-    });
+    // Use a 90s timeout — Docker containers can take up to 60s
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 90_000);
+    try {
+      return await this.request(`/groups/${groupId}/execute`, {
+        method: 'POST',
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        throw new Error('Test execution timed out after 90 seconds. The container may be overloaded or hung.');
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 }
 

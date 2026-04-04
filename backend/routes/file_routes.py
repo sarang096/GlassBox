@@ -61,8 +61,10 @@ def ai_bulk_import(group_id: int, data: AiBulkImport, db: Session = Depends(get_
         created = []
         for item in data.files:
             category = item.category.lower()
-            filename = f"{category}/{item.fileName}"
-            language = _detect_language(item.fileName)
+            # Sanitize: strip embedded newlines/descriptions the AI may append
+            raw_filename = item.fileName.split("\n")[0].strip()
+            filename = f"{category}/{raw_filename}"
+            language = _detect_language(raw_filename)
             content = item.code or ""
 
             # Permission: "read" → readonly, DB is always readonly

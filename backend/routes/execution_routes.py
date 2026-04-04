@@ -9,6 +9,7 @@ Endpoint: POST /api/groups/{group_id}/execute
 """
 
 import os
+import re
 import json
 import shutil
 import tempfile
@@ -33,7 +34,7 @@ router = APIRouter(
 
 # ─── Configuration ───
 DOCKER_IMAGE = "grouphub-runner"
-CONTAINER_TIMEOUT = 60       # seconds
+CONTAINER_TIMEOUT = 120      # seconds (backend kills container after this)
 CONTAINER_MEMORY = "512m"
 CONTAINER_CPUS = "1"
 
@@ -87,10 +88,33 @@ def _get_user_workspace(user: User, group: Group, db: Session) -> list[dict]:
     return workspace
 
 
+def _sanitize_path_component(component: str) -> str:
+    """Strip characters that are invalid in Windows file/directory names."""
+    # Windows invalid chars: < > : " | ? * and control chars
+    # We do NOT strip / or \ here — those are handled as path separators before calling this
+    sanitized = re.sub(r'[<>:"|?*\x00-\x1f]', '', component)
+    return sanitized.strip('. ')  # strip leading/trailing dots and spaces (also invalid on Windows)
+
+
 def _write_workspace_to_disk(workspace: list[dict], base_dir: str):
     """Write virtual files to real filesystem for Docker mounting."""
     for item in workspace:
-        filepath = os.path.join(base_dir, item["filename"])
+        # Defensive: strip embedded newlines/descriptions the AI may have stored
+        raw_filename = item["filename"].split("\n")[0].strip()
+        if not raw_filename:
+            logger.warning(f"Skipping file with empty sanitized filename (original: {item['filename']!r})")
+            continue
+
+        # Normalize separators, sanitize each path component individually
+        parts = raw_filename.replace("\\", "/").split("/")
+        parts = [_sanitize_path_component(p) for p in parts]
+        parts = [p for p in parts if p]  # drop empty segments
+        if not parts:
+            logger.warning(f"Skipping file — all path components were invalid (original: {item['filename']!r})")
+            continue
+
+        safe_filename = os.path.join(*parts)
+        filepath = os.path.join(base_dir, safe_filename)
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         with open(filepath, "w", encoding="utf-8", newline="\n") as f:
             f.write(item["content"])
@@ -148,10 +172,10 @@ echo "└───────────────────────�
 echo ""
 
 if [ -n "$BACKEND_TEST" ]; then
-    # Flatten: move all .py and .csv files to workspace root if they're inside category dirs
-    for category_dir in backend db test; do
+    # Flatten: move all relevant code and test files to workspace root
+    for category_dir in backend db test frontend; do
         if [ -d "$category_dir" ]; then
-            find "$category_dir" -type f \\( -name "*.py" -o -name "*.csv" \\) -exec cp {} /workspace/ \\;
+            find "$category_dir" -type f \( -name "*.py" -o -name "*.csv" -o -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" \) -exec cp {} /workspace/ \;
         fi
     done
 
@@ -164,6 +188,7 @@ else
     echo "No Python test files found. Skipping."
 fi
 
+# ─── Phase 2: Frontend Tests (Jest) ───
 echo ""
 echo "┌──────────────────────────────────────────┐"
 echo "│  PHASE 2: Frontend Tests (Jest)          │"
@@ -171,26 +196,52 @@ echo "└───────────────────────�
 echo ""
 
 if [ -n "$FRONTEND_TEST" ]; then
-    # Flatten frontend files too
-    if [ -d "frontend" ]; then
-        find frontend -type f \\( -name "*.jsx" -o -name "*.js" -o -name "*.tsx" -o -name "*.ts" \\) -exec cp {} /workspace/ \\;
-    fi
-
     echo "Found test files:$FRONTEND_TEST"
     echo "---"
-    
-    # Initialize npm and install testing deps
-    cd /workspace
-    npm init -y --silent 2>/dev/null
-    npm install --save-dev --silent @testing-library/react @testing-library/jest-dom jest babel-jest @babel/preset-env @babel/preset-react react react-dom 2>&1 | tail -3
-    
-    # Create babel config for JSX
-    echo '{"presets":["@babel/preset-env","@babel/preset-react"]}' > .babelrc
-    
-    # Run Jest
-    npx jest --verbose --no-cache --forceExit 2>&1 || true
+
+    # Fix Module Resolution: Symlink global modules into /workspace/node_modules
+    # This is the most robust way to make Jest find pre-installed global packages offline
+    GLOBAL_NPM=$(npm root -g 2>/dev/null || echo "/usr/local/lib/node_modules")
+    mkdir -p /workspace/node_modules
+    for pkg in react react-dom @testing-library/react @testing-library/jest-dom @babel/core @babel/preset-env @babel/preset-react jest-environment-jsdom; do
+        if [ -d "${GLOBAL_NPM}/${pkg}" ]; then
+            ln -s "${GLOBAL_NPM}/${pkg}" "/workspace/node_modules/${pkg}" 2>/dev/null || true
+        fi
+    done
+    export NODE_PATH="/workspace/node_modules:${GLOBAL_NPM}"
+
+    # Check if jest is available
+    if command -v jest &>/dev/null || [ -f /usr/lib/node_modules/jest/bin/jest.js ]; then
+        JEST_BIN="jest"
+        command -v jest &>/dev/null || JEST_BIN="node /usr/lib/node_modules/jest/bin/jest.js"
+
+        # Ensure package.json exists so Jest resolves correctly
+        if [ ! -f "/workspace/package.json" ]; then
+            echo '{"name":"test-workspace","private":true,"dependencies":{}}' > /workspace/package.json
+        fi
+
+        # Use absolute paths in .babelrc
+        cat > /workspace/.babelrc << BABELEOF
+{"presets":["${GLOBAL_NPM}/@babel/preset-env","${GLOBAL_NPM}/@babel/preset-react"]}
+BABELEOF
+
+        # Always create a jest config
+        cat > /workspace/jest.config.json << 'JESTEOF'
+{
+  "testEnvironment": "jsdom",
+  "testMatch": ["**/*.test.js", "**/*.test.jsx", "**/*.test.ts", "**/*.test.tsx"],
+  "transform": {"^.+\\\\.(js|jsx|ts|tsx)$": "babel-jest"},
+  "moduleFileExtensions": ["js", "jsx", "ts", "tsx", "json"],
+  "rootDir": "/workspace"
+}
+JESTEOF
+
+        $JEST_BIN --config /workspace/jest.config.json --verbose --no-cache --forceExit 2>&1 || true
+    else
+        echo "Jest not found in image. Skipping."
+    fi
 else
-    echo "No frontend test files (*.test.jsx / *.test.js) found. Skipping."
+    echo "No frontend test files found. Skipping."
 fi
 
 echo ""
@@ -220,7 +271,9 @@ echo "════════════════════════�
 
     start_time = time.time()
 
+    container = None
     try:
+        # Run detached so we can enforce a timeout via container.wait()
         container = client.containers.run(
             image=DOCKER_IMAGE,
             command=["bash", "/workspace/__run_tests.sh"],
@@ -228,19 +281,38 @@ echo "════════════════════════�
             network_mode="none",        # No internet access
             mem_limit=CONTAINER_MEMORY,
             nano_cpus=int(float(CONTAINER_CPUS) * 1e9),
-            remove=True,                # Auto-remove when done
+            remove=False,               # We remove manually after fetching logs
             stdout=True,
             stderr=True,
-            detach=False,               # Wait for completion
+            detach=True,                # Run in background so we can timeout
             working_dir="/workspace",
             environment={
                 "PYTHONDONTWRITEBYTECODE": "1",
                 "NODE_ENV": "test",
+                "NODE_PATH": "/usr/local/lib/node_modules",
             },
         )
 
-        # container.run with detach=False returns bytes
-        full_output = container.decode("utf-8") if isinstance(container, bytes) else str(container)
+        try:
+            # Block until the container finishes, with a hard timeout
+            container.wait(timeout=CONTAINER_TIMEOUT)
+        except Exception:
+            # Timed out or connection error — kill the container
+            logger.warning(f"Container timed out after {CONTAINER_TIMEOUT}s — killing")
+            try:
+                container.kill()
+            except Exception:
+                pass
+            elapsed = time.time() - start_time
+            timeout_msg = f"⏱ Test execution timed out after {CONTAINER_TIMEOUT} seconds."
+            results["full_output"] = timeout_msg
+            results["duration"] = round(elapsed, 2)
+            results["backend_tests"]["status"] = "error"
+            results["backend_tests"]["output"] = timeout_msg
+            return results
+
+        # Fetch logs after container has finished
+        full_output = container.logs(stdout=True, stderr=True).decode("utf-8")
         elapsed = time.time() - start_time
 
         results["full_output"] = full_output
@@ -294,6 +366,14 @@ echo "════════════════════════�
     except Exception as e:
         logger.error(f"Execution error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}")
+
+    finally:
+        # Always clean up the container (even if timed out or errored)
+        if container:
+            try:
+                container.remove(force=True)
+            except Exception:
+                pass
 
 
 # ─── Main Endpoint ───
