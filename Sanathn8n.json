@@ -1,32 +1,6 @@
 {
-  "name": "AI Code Generator — Phased (Gemini 2.0 Flash + 3 Test Levels)",
+  "name": "AI Code Generator – Phased (Gemini 2.5 Flash Lite + Dynamic Bugs v3)",
   "nodes": [
-    {
-      "parameters": {
-        "httpMethod": "POST",
-        "path": "ai-path",
-        "responseMode": "lastNode",
-        "options": {
-          "respondWithOptions": true
-        }
-      },
-      "id": "node_webhook",
-      "name": "Webhook",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
-      "position": [200, 300],
-      "webhookId": "ai-path"
-    },
-    {
-      "parameters": {
-        "jsCode": "const body = $input.first().json.body ?? $input.first().json;\nconst group_id = body.group_id;\nconst description = body.description;\nconst frontend_language = body.frontend_language;\nconst backend_language = body.backend_language;\nconst db_style = body.db_style;\nconst token = body.token;\nif (!group_id || !description) throw new Error('Missing required fields: group_id, description');\nreturn [{ json: { group_id, description, frontend_language: frontend_language || 'react', backend_language: backend_language || 'python', db_style: db_style || 'csv', token: token || '' } }];"
-      },
-      "id": "node_parse",
-      "name": "Parse Input",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [420, 300]
-    },
     {
       "parameters": {
         "method": "POST",
@@ -34,23 +8,18 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a database schema generator. Generate a ' + $json.db_style + ' database file for this app.\\n\\nApp: ' + $json.description + '\\n\\nReply using EXACTLY this format with these exact delimiters and nothing else before or after:\\n\\n<<<FILENAME>>>\\ndata.' + $json.db_style + '\\n<<<SCHEMA_SUMMARY>>>\\none sentence describing the columns\\n<<<CODE>>>\\nid,col1,col2,col3\\n1,val,val,val\\n2,val,val,val\\n3,val,val,val\\n<<<END>>>\\n\\nRules:\\n- id is the first column\\n- 4-6 meaningful columns for this app\\n- 3 realistic sample rows\\n- Plain CSV, no quotes unless value contains a comma' }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 600 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }] }) }}",
-        "options": { "timeout": 60000 }
+        "options": {
+          "timeout": 60000
+        }
       },
-      "id": "node_phase1_db",
-      "name": "Phase 1 — Generate DB",
+      "id": "aa0f4dbd-b530-40ca-8c35-ece95b7c4b1c",
+      "name": "Phase 1 - Generate DB",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [640, 300]
-    },
-    {
-      "parameters": {
-        "jsCode": "function extract(raw, tag) {\n  const open = '<<<' + tag + '>>>';\n  const next = raw.indexOf('<<<', raw.indexOf(open) + open.length);\n  const start = raw.indexOf(open) + open.length;\n  const end = next === -1 ? raw.length : next;\n  return raw.substring(start, end).trim();\n}\nconst raw = ($input.first().json.candidates?.[0]?.content?.parts?.[0]?.text) || '';\nif (!raw) throw new Error('Empty response from Gemini');\nconst fileName = extract(raw, 'FILENAME');\nconst schema_summary = extract(raw, 'SCHEMA_SUMMARY');\nconst code = extract(raw, 'CODE').replace('<<<END>>>', '').trim();\nif (!fileName || !code) throw new Error('Could not extract fields:\\n' + raw.substring(0, 400));\nconst prev = $('Parse Input').first().json;\nreturn [{ json: { ...prev, db: { fileName, code, schema_summary } } }];"
-      },
-      "id": "node_parse_db",
-      "name": "Parse DB Output",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [860, 300]
+      "position": [
+        10400,
+        304
+      ]
     },
     {
       "parameters": {
@@ -58,24 +27,19 @@
         "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key={{ $env.GEMINI_KEY }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a backend developer. Write a complete Python Flask 3.x REST API.\\n\\nApp: ' + $json.description + '\\nDB file: ' + $json.db.fileName + '\\nSchema: ' + $json.db.schema_summary + '\\nCSV sample:\\n' + $json.db.code + '\\n\\nReply using EXACTLY this format:\\n\\n<<<FILENAME>>>\\napp.py\\n<<<ENDPOINTS>>>\\nGET /api/items\\nPOST /api/items\\nGET /api/items/<id>\\nPUT /api/items/<id>\\nDELETE /api/items/<id>\\n<<<CODE>>>\\n# full Flask app code here\\n<<<END>>>\\n\\nCRITICAL Flask 3.x rules (violating any of these will break the app):\\n- Use Flask 3.x — NEVER use @app.before_first_request (it was removed in Flask 2.3)\\n- Initialize data at module level, OUTSIDE any function, exactly like this:\\n    DATA_STORE = []\\n    def _load():\\n        # ... read csv ...\\n    _load()\\n- When updating or deleting, MUTATE the list in-place (e.g. DATA_STORE[:] = [x for x in DATA_STORE if x[\\'id\\'] != id]).\\n- NEVER reassign the global variable (no DATA_STORE = ...), as it breaks testing references.\\n- Full CRUD using csv module on \\'' + $json.db.fileName + '\\', always sync with DATA_STORE\\n- JSON responses with jsonify(), correct HTTP status codes (200, 201, 404)\\n- app.run(host=\\'0.0.0.0\\', port=5000, debug=False) at the bottom inside if __name__ == \\'__main__\\'\\n- Imports: flask, flask_cors, csv, json, os, uuid only\\n- Enable CORS: from flask_cors import CORS; CORS(app)\\n- Keep in-memory list as source of truth, write-through to CSV on changes\\n- Write complete, real working code — no pseudocode, no placeholders\\n- NO @app.before_first_request, NO @app.before_request for init' }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 3000 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }] }) }}",
-        "options": { "timeout": 60000 }
+        "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a backend developer. Write a complete ' + $json.backend_language + ' REST API.\\n\\nApp: ' + $json.description + '\\nDB file: ' + $json.db.fileName + '\\nSchema: ' + $json.db.schema_summary + '\\nCSV sample:\\n' + $json.db.code + '\\n\\nReply using EXACTLY this format:\\n\\n<<<FILENAME>>>\\n' + ($json.backend_language == 'python' ? 'app.py' : $json.backend_language == 'java' ? 'Main.java' : 'main.c') + '\\n<<<ENDPOINTS>>>\\nGET /api/items\\nPOST /api/items\\nGET /api/items/<id>\\nPUT /api/items/<id>\\nDELETE /api/items/<id>\\n<<<CODE>>>\\n# full Flask app code here\\n<<<END>>>\\n\\nCRITICAL Flask 3.x rules (violating any of these will break the app):\\n- Use Flask 3.x — NEVER use @app.before_first_request (it was removed in Flask 2.3)\\n- Initialize data at module level, OUTSIDE any function, exactly like this:\\n    DATA_STORE = []\\n    def _load():\\n        # ... read csv ...\\n    _load()\\n- When updating or deleting, MUTATE the list in-place (e.g. DATA_STORE[:] = [x for x in DATA_STORE if x[\\'id\\'] != id]).\\n- NEVER reassign the global variable (no DATA_STORE = ...), as it breaks testing references.\\n- Full CRUD using csv module on \\'' + $json.db.fileName + '\\', always sync with DATA_STORE\\n- JSON responses with jsonify(), correct HTTP status codes (200, 201, 404)\\n- app.run(host=\\'0.0.0.0\\', port=5000, debug=False) at the bottom inside if __name__ == \\'__main__\\'\\n- Imports: flask, flask_cors, csv, json, os, uuid only\\n- Enable CORS: from flask_cors import CORS; CORS(app)\\n- Keep in-memory list as source of truth, write-through to CSV on changes\\n- Write complete, real working code — no pseudocode, no placeholders\\n- NO @app.before_first_request, NO @app.before_request for init\\n- This code MUST be 100% correct and pass all tests — do NOT introduce any bugs' }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 3000 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }] }) }}",
+        "options": {
+          "timeout": 60000
+        }
       },
-      "id": "node_phase2_backend",
-      "name": "Phase 2 — Generate Backend",
+      "id": "672808f3-3848-4e1b-939a-ba3ebec32a48",
+      "name": "Phase 2 - Generate Backend",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [1080, 300]
-    },
-    {
-      "parameters": {
-        "jsCode": "function extract(raw, tag) {\n  const open = '<<<' + tag + '>>>';\n  const next = raw.indexOf('<<<', raw.indexOf(open) + open.length);\n  const start = raw.indexOf(open) + open.length;\n  const end = next === -1 ? raw.length : next;\n  return raw.substring(start, end).trim();\n}\nconst raw = ($input.first().json.candidates?.[0]?.content?.parts?.[0]?.text) || '';\nif (!raw) throw new Error('Empty response from Gemini');\nconst fileName = extract(raw, 'FILENAME');\nconst endpointsRaw = extract(raw, 'ENDPOINTS');\nconst code = extract(raw, 'CODE').replace('<<<END>>>', '').trim();\nconst endpoints = endpointsRaw.split('\\n').map(e => e.trim()).filter(Boolean);\nif (!fileName || !code) throw new Error('Could not extract fields:\\n' + raw.substring(0, 400));\nconst prev = $('Parse DB Output').first().json;\nreturn [{ json: { ...prev, backend: { fileName: fileName || 'app.py', code, endpoints } } }];"
-      },
-      "id": "node_parse_backend",
-      "name": "Parse Backend Output",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1300, 300]
+      "position": [
+        10848,
+        304
+      ]
     },
     {
       "parameters": {
@@ -83,24 +47,19 @@
         "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key={{ $env.GEMINI_KEY }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a senior Python code reviewer. Review and fix the Flask 3.x code below.\\n\\nRules to enforce:\\n1. NEVER use @app.before_first_request — it was removed in Flask 2.3. Replace with module-level initialization.\\n2. Data must be loaded at module level (outside functions), like:\\n   items = []\\n   def _load_data():\\n       # read csv here\\n   _load_data()\\n3. All routes must return jsonify() responses\\n4. app.run() must be inside if __name__ == \\'__main__\\':\\n5. CORS must be enabled with flask_cors\\n6. No syntax errors, no undefined variables\\n\\nOriginal code:\\n```python\\n' + $json.backend.code + '\\n```\\n\\nReply using EXACTLY this format:\\n\\n<<<FIXED_CODE>>>\\n# corrected full Flask app code here — do NOT add explanations, just the code\\n<<<END>>>' }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 3500 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }] }) }}",
-        "options": { "timeout": 60000 }
+        "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a senior code reviewer. Review and fix the ' + $json.backend_language + ' code below.\\n\\nRules to enforce:\\n1. NEVER use @app.before_first_request â€” it was removed in Flask 2.3. Replace with module-level initialization.\\n2. Data must be loaded at module level (outside functions), like:\\n   items = []\\n   def _load_data():\\n       # read csv here\\n   _load_data()\\n3. All routes must return jsonify() responses\\n4. app.run() must be inside if __name__ == \\'__main__\\':\\n5. CORS must be enabled with flask_cors\\n6. No syntax errors, no undefined variables\\n\\nOriginal code:\\n```python\\n' + ($json.backend_solution?.code || $json.backend.code) + '\\n```\\n\\nReply using EXACTLY this format:\\n\\n<<<FIXED_CODE>>>\\n# corrected full Flask app code here â€” do NOT add explanations, just the code\\n<<<END>>>' }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 3500 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }] }) }}",
+        "options": {
+          "timeout": 60000
+        }
       },
-      "id": "node_phase2b_validate_backend",
-      "name": "Phase 2b — Validate & Fix Backend",
+      "id": "1a3e5e92-4d11-48d7-88f0-48a859a5ca4b",
+      "name": "Phase 2b - Validate & Fix Backend",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [1520, 300]
-    },
-    {
-      "parameters": {
-        "jsCode": "function extract(raw, tag) {\n  const open = '<<<' + tag + '>>>';\n  const next = raw.indexOf('<<<', raw.indexOf(open) + open.length);\n  const start = raw.indexOf(open) + open.length;\n  const end = next === -1 ? raw.length : next;\n  return raw.substring(start, end).trim();\n}\nconst raw = ($input.first().json.candidates?.[0]?.content?.parts?.[0]?.text) || '';\nconst prev = $('Parse Backend Output').first().json;\n\n// Try to extract fixed code; fall back to original if extraction fails\nlet fixedCode = '';\ntry {\n  fixedCode = extract(raw, 'FIXED_CODE').replace('<<<END>>>', '').trim();\n} catch(e) {}\n\n// Fall back to original if no fix was produced\nif (!fixedCode || fixedCode.length < 50) {\n  fixedCode = prev.backend.code;\n}\n\n// Patch: remove any remaining @app.before_first_request if LLM missed it\nfixedCode = fixedCode.replace(/@app\\.before_first_request\\s*\\n(\\s*def \\w+\\(\\):[\\s\\S]*?)(?=\\n@|\\ndef |\\nclass |\\napp\\.run|\\nif __name__)/g, (match, fnBody) => {\n  const bodyLines = fnBody.split('\\n').slice(1).map(l => l.replace(/^    /, ''));\n  return '\\n# (auto-fixed: moved from before_first_request)\\n' + bodyLines.join('\\n') + '\\n';\n});\n\n// Patch: strip markdown code fences the LLM may have wrapped code in (```python ... ```)\nfixedCode = fixedCode.replace(/^```[\\w]*\\s*\\n?/gm, '').replace(/^```\\s*$/gm, '').trim();\n\n// Patch: strip shebang line (#!/usr/bin/env python3) — not needed in Flask, causes SyntaxError if not line 1\nfixedCode = fixedCode.replace(/^#!\\/.*\\n?/m, '');\n\n// Patch: strip leftover shebang fragments like 'sr/bin/env python3' or 'usr/bin/env python3'\nfixedCode = fixedCode.replace(/^[a-z]*\\/bin\\/env\\s+\\w+[\\d.]*\\s*\\n?/m, '').trim();\n\n// Patch: fix LLM dropping 'from' in Python import statements\n// e.g. 'flask import Flask' -> 'from flask import Flask'\nfixedCode = fixedCode.replace(/^((?!from |import )\\S[\\w_]+ import )/gm, 'from $1');\n\n// Patch: if code still has no valid Python imports at all, prepend standard Flask imports\nconst hasImport = /^(from |import )/m.test(fixedCode);\nif (!hasImport) {\n  fixedCode = 'from flask import Flask, request, jsonify, abort\\nfrom flask_cors import CORS\\nimport csv, os, json, uuid\\n\\n' + fixedCode;\n}\n\nreturn [{ json: { ...prev, backend: { ...prev.backend, code: fixedCode } } }];"
-      },
-      "id": "node_parse_validate_backend",
-      "name": "Parse Validated Backend",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1740, 300]
+      "position": [
+        11296,
+        304
+      ]
     },
     {
       "parameters": {
@@ -108,24 +67,32 @@
         "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key={{ $env.GEMINI_KEY }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a frontend developer. Write a complete ' + $json.frontend_language + ' component.\\n\\nApp: ' + $json.description + '\\nBackend: http://localhost:5000\\nEndpoints:\\n' + $json.backend.endpoints.join('\\n') + '\\n\\nReply using EXACTLY this format:\\n\\n<<<FILENAME>>>\\nApp.jsx\\n<<<CODE>>>\\n// full React component here\\n<<<END>>>\\n\\nCode rules:\\n- Functional React, useState + useEffect\\n- fetch() to call the endpoints above\\n- Full UI: list records, add form, delete button\\n- data-testid=\\'item-list\\' on list container, \\'item-row\\' on each row, \\'add-form\\' on form, \\'name-input\\' on main input, \\'submit-btn\\' on submit, \\'delete-btn\\' on delete\\n- Tailwind utility classes for styling\\n- Single default export, no external libs beyond React' }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 3000 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }] }) }}",
-        "options": { "timeout": 60000 }
+        "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a senior software engineer creating debugging challenges for students.\\n\\nTake the correct code below and inject EXACTLY 3-4 DIFFERENT bugs that break CORE functionality. The goal is that when unit tests run against this buggy code, at least 70% of tests FAIL.\\n\\nSTRICT RULES:\\n- Code must run without syntax errors (no SyntaxError, no ImportError)\\n- Do NOT add comments mentioning bugs\\n- Do NOT remove functions or routes entirely\\n- Each bug must affect a DIFFERENT route/endpoint\\n- Bugs must cause test FAILURES (wrong return values, wrong status codes, missing data, broken logic)\\n\\nVARIATION SEED: ' + $json.bug_seed + '\\nYou MUST pick 3-4 bugs from DIFFERENT categories below (seed%4=' + ($json.bug_seed % 4) + '):\\n\\nCATEGORY A - WRONG STATUS CODES: Return 200 instead of 201 on POST create. Return 200 instead of 404 when item not found. Return 204 instead of 200 on GET.\\nCATEGORY B - BROKEN CRUD LOGIC: In PUT/update, do not actually update the item fields (ignore the request body). In DELETE, remove from CSV but not from DATA_STORE (or vice versa). In POST, do not append the new item to DATA_STORE.\\nCATEGORY C - WRONG RESPONSE DATA: Return wrong JSON key names (e.g. wrong-key instead of the actual field name). Return the entire list instead of a single item on GET by ID. Return empty dict {} instead of the created item on POST.\\nCATEGORY D - DATA CORRUPTION: Use DATA_STORE = [...] instead of DATA_STORE[:] = [...] (breaks reference). Use wrong ID comparison (string vs int mismatch). Overwrite all items instead of updating one.\\n\\nIMPORTANT: The bugs must affect the GET, POST, PUT, and DELETE operations so that MOST tests fail, not just one or two.\\n\\nReturn ONLY the full buggy ' + $json.backend_language + ' code. No markdown fences, no explanations, no comments about bugs.\\n\\nCode:\\n' + $json.backend_fixed + '\\n' }] }], generationConfig: { temperature: 0.8, maxOutputTokens: 3500 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }]}) }}",
+        "options": {
+          "timeout": 60000
+        }
       },
-      "id": "node_phase3_frontend",
-      "name": "Phase 3 — Generate Frontend",
+      "id": "5dd93958-5dad-4bcc-86b7-5790ac711d1c",
+      "name": "Phase 2c - Generate Backend Bugs",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [1960, 300]
+      "position": [
+        11744,
+        304
+      ]
     },
     {
       "parameters": {
-        "jsCode": "function extract(raw, tag) {\n  const open = '<<<' + tag + '>>>';\n  const next = raw.indexOf('<<<', raw.indexOf(open) + open.length);\n  const start = raw.indexOf(open) + open.length;\n  const end = next === -1 ? raw.length : next;\n  return raw.substring(start, end).trim();\n}\nconst raw = ($input.first().json.candidates?.[0]?.content?.parts?.[0]?.text) || '';\nif (!raw) throw new Error('Empty response from Gemini');\nconst fileName = extract(raw, 'FILENAME');\nconst code = extract(raw, 'CODE').replace('<<<END>>>', '').trim();\nif (!fileName || !code) throw new Error('Could not extract fields:\\n' + raw.substring(0, 400));\nconst prev = $('Parse Validated Backend').first().json;\nreturn [{ json: { ...prev, frontend: { fileName: fileName || 'App.jsx', code } } }];"
+        "jsCode": "const raw = ($input.first().json.candidates?.[0]?.content?.parts?.[0]?.text) || '';\nconst prev = $('Parse Validated Backend1').first().json;\nlet buggyCode = raw.replace(/^```[\\w]*\\s*\\n?/gm, '').replace(/^```\\s*$/gm, '').trim();\nif (!buggyCode || buggyCode.length < 100) buggyCode = prev.backend_fixed;\n// backend.code = buggy (student sees this), backend_solution.code = correct (for tests)\nreturn [{ json: { ...prev, backend: { ...prev.backend, code: buggyCode } } }];"
       },
-      "id": "node_parse_frontend",
-      "name": "Parse Frontend Output",
+      "id": "0d069139-cd76-43ea-9614-9faf3123e20f",
+      "name": "Parse Backend Bugs",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2180, 300]
+      "position": [
+        11968,
+        304
+      ]
     },
     {
       "parameters": {
@@ -133,24 +100,19 @@
         "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key={{ $env.GEMINI_KEY }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a QA engineer. Write Python backend API tests using Flask test client.\\n\\nHere is the EXACT backend code you must write tests for:\\n```python\\n' + $json.backend.code + '\\n```\\n\\nApp: ' + $json.description + '\\nEndpoints:\\n' + $json.backend.endpoints.join('\\n') + '\\n\\nReply using EXACTLY this format:\\n\\n<<<FILENAME>>>\\ntest_backend.py\\n<<<CODE>>>\\n# full test file here\\n<<<END>>>\\n\\nStrict rules:\\n- import unittest\\n- import app as my_app\\n- class must extend unittest.TestCase\\n- setUp: self.client = my_app.app.test_client(); my_app.DATA_STORE.clear()\\n- tearDown: my_app.DATA_STORE.clear()\\n- Use self.client.get/post/put/delete with json= param\\n- Use response.get_json(), response.status_code\\n- test_get_all, test_post_create, test_get_single, test_put_update, test_delete\\n- Assert correct HTTP status codes (200, 201, 404)\\n- Always reference the data store as my_app.DATA_STORE in your assertions.\\n- NO csv module, NO file I/O in tests\\n- if __name__ == \\'__main__\\': unittest.main()\\n- These tests must pass when run against the correct DATA_STORE variable above' }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 2500 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }] }) }}",
-        "options": { "timeout": 60000 }
+        "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a frontend developer. Write a complete ' + $json.frontend_language + ' component.\\n\\nApp: ' + $json.description + '\\nBackend: http://localhost:5000\\nEndpoints:\\n' + $json.backend.endpoints.join('\\n') + '\\n\\nReply using EXACTLY this format:\\n\\n<<<FILENAME>>>\\n' + ($json.frontend_language == 'nextjs' ? 'page.js' : 'App.jsx') + '\\n<<<CODE>>>\\n// full React component here\\n<<<END>>>\\n\\nCode rules:\\n- Use standard ' + $json.frontend_language + ' paradigms (e.g. hooks for React, App router for Next.js)\\n- fetch() to call the endpoints above\\n- Full UI: list records, add form, delete button\\n- data-testid=\\'item-list\\' on list container, \\'item-row\\' on each row, \\'add-form\\' on form, \\'name-input\\' on main input, \\'submit-btn\\' on submit, \\'delete-btn\\' on delete\\n- Tailwind utility classes for styling\\n- Single default export, no external libs beyond React\\n- After POST to create item, update state with new item or re-fetch list\\n- Fill in form input with user text before POST\\n- Clear input field after successful submission\\n- Write CORRECT, working code - NO bugs, NO broken handlers' }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 3000 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }] }) }}",
+        "options": {
+          "timeout": 60000
+        }
       },
-      "id": "node_phase4a_backend_tests",
-      "name": "Phase 4a — Backend Tests",
+      "id": "f99e6a2d-e8fb-41c7-a1e6-184c96d0c8e6",
+      "name": "Phase 3 - Generate Frontend",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [2400, 300]
-    },
-    {
-      "parameters": {
-        "jsCode": "function extract(raw, tag) {\n  const open = '<<<' + tag + '>>>';\n  const next = raw.indexOf('<<<', raw.indexOf(open) + open.length);\n  const start = raw.indexOf(open) + open.length;\n  const end = next === -1 ? raw.length : next;\n  return raw.substring(start, end).trim();\n}\nconst raw = ($input.first().json.candidates?.[0]?.content?.parts?.[0]?.text) || '';\nif (!raw) throw new Error('Empty response from Gemini');\nconst fileName = extract(raw, 'FILENAME');\nconst code = extract(raw, 'CODE').replace('<<<END>>>', '').trim();\nif (!code) throw new Error('Could not extract backend test code:\\n' + raw.substring(0, 400));\nconst prev = $('Parse Frontend Output').first().json;\nreturn [{ json: { ...prev, test_backend: { fileName: fileName || 'test_backend.py', code } } }];"
-      },
-      "id": "node_parse_backend_tests",
-      "name": "Parse Backend Tests",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [2620, 300]
+      "position": [
+        12192,
+        304
+      ]
     },
     {
       "parameters": {
@@ -158,24 +120,32 @@
         "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key={{ $env.GEMINI_KEY }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a frontend QA engineer. Write React component tests using React Testing Library and Jest.\\n\\nHere is the EXACT frontend component code you must write tests for:\\n```jsx\\n' + $json.frontend.code + '\\n```\\n\\nApp: ' + $json.description + '\\nBackend endpoints: ' + $json.backend.endpoints.join(', ') + '\\n\\nReply using EXACTLY this format:\\n\\n<<<FILENAME>>>\\nApp.test.jsx\\n<<<CODE>>>\\n// full test file here\\n<<<END>>>\\n\\nStrict rules:\\n- Read the frontend code above carefully — use the EXACT data-testid attributes, prop names, and state field names you see there\\n- import React from \\'react\\'\\n- import { render, screen, fireEvent, waitFor } from \\'@testing-library/react\\'\\n- import App from \\'./App\\'\\n- Mock ALL fetch() calls with jest.fn() — return realistic mock data matching the app\\'s data shape\\n- global.fetch = jest.fn() in beforeAll or beforeEach\\n- test_renders: check page renders without crash\\n- test_shows_items: mock fetch to return sample items, check they appear in the list\\n- test_add_item: fill the form, click submit, check new item appears\\n- test_delete_item: render with items, click delete, check item removed\\n- beforeEach: jest.clearAllMocks()\\n- NO real network calls\\n- These tests must pass when run against the correct App.jsx component above' }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 2500 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }] }) }}",
-        "options": { "timeout": 60000 }
+        "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a code mutation specialist creating debugging challenges for students.\\n\\nTake this CORRECT ' + $json.frontend_language + ' component and inject EXACTLY 3-4 DIFFERENT bugs that break CORE functionality. The goal is that when Jest tests run against this buggy code, at least 70% of tests FAIL.\\n\\nVARIATION SEED: ' + $json.bug_seed + '\\nYou MUST pick 3-4 bugs from DIFFERENT categories below (seed%4=' + (($json.bug_seed + 1) % 4) + '):\\n\\nCATEGORY A - BROKEN FETCH CALLS: Use wrong endpoint URL (e.g. /api/item instead of /api/items). Use wrong HTTP method (GET instead of POST for creating). Missing Content-Type header on POST/PUT requests. Forget to call response.json().\\nCATEGORY B - BROKEN STATE MANAGEMENT: Do not update state after successful POST (list does not refresh). Set items to empty array instead of the fetched data. Use setItems(data) where data is the raw Response object instead of parsed JSON.\\nCATEGORY C - BROKEN EVENT HANDLERS: Remove event.preventDefault() from form submit (causes page reload). Pass wrong ID to delete handler (e.g. always delete first item, or pass index instead of id). Form submit handler does not actually call fetch.\\nCATEGORY D - BROKEN RENDERING: Use wrong data-testid values (e.g. items-list instead of item-list). Do not render the list of items at all (return empty div). Show wrong field from each item in the list.\\n\\nIMPORTANT:\\n- Code must NOT have syntax errors\\n- Bugs must affect rendering, fetching, adding, AND deleting so that MOST tests fail\\n- Do NOT add comments mentioning bugs\\n- Return ONLY the full buggy code, no markdown fences, no explanations\\n\\nCORRECT CODE:\\n' + $json.frontend_solution.code + '\\n' }] }], generationConfig: { temperature: 0.8, maxOutputTokens: 3500 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }]}) }}",
+        "options": {
+          "timeout": 60000
+        }
       },
-      "id": "node_phase4b_frontend_tests",
-      "name": "Phase 4b — Frontend Tests",
+      "id": "fc2437bd-a593-4fb0-8278-5255ad8659c5",
+      "name": "Phase 3b - Generate Frontend Bugs",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [2840, 300]
+      "position": [
+        12640,
+        304
+      ]
     },
     {
       "parameters": {
-        "jsCode": "function extract(raw, tag) {\n  const open = '<<<' + tag + '>>>';\n  const next = raw.indexOf('<<<', raw.indexOf(open) + open.length);\n  const start = raw.indexOf(open) + open.length;\n  const end = next === -1 ? raw.length : next;\n  return raw.substring(start, end).trim();\n}\nconst raw = ($input.first().json.candidates?.[0]?.content?.parts?.[0]?.text) || '';\nif (!raw) throw new Error('Empty response from Gemini');\nconst fileName = extract(raw, 'FILENAME');\nconst code = extract(raw, 'CODE').replace('<<<END>>>', '').trim();\nif (!code) throw new Error('Could not extract frontend test code:\\n' + raw.substring(0, 400));\nconst prev = $('Parse Backend Tests').first().json;\nreturn [{ json: { ...prev, test_frontend: { fileName: fileName || 'App.test.jsx', code } } }];"
+        "jsCode": "const raw = ($input.first().json.candidates?.[0]?.content?.parts?.[0]?.text) || '';\nconst prev = $('Parse Frontend Output1').first().json;\nlet buggyCode = raw.replace(/^\\`\\`\\`[\\w]*\\s*\\n?/gm, '').replace(/^\\`\\`\\`\\s*$/gm, '').trim();\nif (!buggyCode || buggyCode.length < 100) buggyCode = prev.frontend_solution?.code || prev.frontend.code;\nreturn [{ json: { ...prev, frontend: { ...prev.frontend, code: buggyCode } } }];"
       },
-      "id": "node_parse_frontend_tests",
-      "name": "Parse Frontend Tests",
+      "id": "0c5bbf71-fbc2-40ff-9986-0c3ce2851b77",
+      "name": "Parse Frontend Bugs",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3060, 300]
+      "position": [
+        12864,
+        304
+      ]
     },
     {
       "parameters": {
@@ -183,34 +153,193 @@
         "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key={{ $env.GEMINI_KEY }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are an E2E QA engineer. Write Cypress end-to-end tests.\\n\\nApp: ' + $json.description + '\\nFrontend: http://localhost:3000\\nBackend: http://localhost:5000\\nEndpoints:\\n' + $json.backend.endpoints.join('\\n') + '\\n\\ndata-testid attributes: item-list, item-row, add-form, name-input, submit-btn, delete-btn\\n\\nReply using EXACTLY this format:\\n\\n<<<FILENAME>>>\\ncypress/e2e/app.cy.js\\n<<<CODE>>>\\n// full Cypress test file here\\n<<<END>>>\\n\\nStrict rules:\\n- describe block named after the app\\n- beforeEach: cy.visit(\\'http://localhost:3000\\')\\n- test_page_loads, test_shows_existing_items, test_add_item, test_delete_item\\n- Use cy.intercept() for API stubs with aliases\\n- Use cy.get(\\'[data-testid=...]\\') selectors\\n- NO hardcoded waits — use cy.wait(\\'@alias\\')' }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 2500 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }] }) }}",
-        "options": { "timeout": 60000 }
+        "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a QA engineer. Write backend API tests for the provided ' + $json.backend_language + ' code.\\n\\nHere is the EXACT CORRECT backend code you must write tests for:\\n```\\n' + $json.backend_solution.code + '\\n```\\n\\nApp: ' + $json.description + '\\nEndpoints:\\n' + $json.backend.endpoints.join('\\n') + '\\n\\nReply using EXACTLY this format:\\n\\n<<<FILENAME>>>\\n' + ($json.backend_language === 'python' ? 'test_backend.py' : $json.backend_language === 'java' ? 'TestBackend.java' : 'test_backend.c') + '\\n<<<CODE>>>\\n// test code here\\n<<<END>>>\\n\\nStrict rules:\\n' + ($json.backend_language === 'python' ? '- import unittest\\n- import app as my_app\\n- class must extend unittest.TestCase\\n- setUp: self.client = my_app.app.test_client(); my_app.DATA_STORE.clear()\\n- tearDown: my_app.DATA_STORE.clear()\\n- Use self.client.get/post/put/delete with json= param\\n- Use response.get_json(), response.status_code' : '- Write standard assertion files that make HTTP requests to localhost:5000\\n- Do NOT import the application directly' ) + '\\n- test_get_items, test_create_item, test_delete_item' }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 3500 }, safetySettings: [] }) }}",
+        "options": {
+          "timeout": 60000
+        }
       },
-      "id": "node_phase4c_e2e_tests",
-      "name": "Phase 4c — E2E Tests",
+      "id": "4f165f58-d4ce-4fc6-b9e3-5024e5dcc876",
+      "name": "Phase 4a - Backend Tests",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [3280, 300]
+      "position": [
+        13088,
+        304
+      ]
     },
     {
       "parameters": {
-        "jsCode": "function extract(raw, tag) {\n  const open = '<<<' + tag + '>>>';\n  const next = raw.indexOf('<<<', raw.indexOf(open) + open.length);\n  const start = raw.indexOf(open) + open.length;\n  const end = next === -1 ? raw.length : next;\n  return raw.substring(start, end).trim();\n}\nconst raw = ($input.first().json.candidates?.[0]?.content?.parts?.[0]?.text) || '';\nif (!raw) throw new Error('Empty response from Gemini');\nconst fileName = extract(raw, 'FILENAME');\nconst code = extract(raw, 'CODE').replace('<<<END>>>', '').trim();\nif (!code) throw new Error('Could not extract E2E test code:\\n' + raw.substring(0, 400));\nconst prev = $('Parse Frontend Tests').first().json;\nreturn [{ json: { ...prev, test_e2e: { fileName: fileName || 'cypress/e2e/app.cy.js', code } } }];"
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key={{ $env.GEMINI_KEY }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a frontend QA engineer. Write component tests for the provided ' + $json.frontend_language + ' code using Jest.\\n\\nHere is the EXACT CORRECT frontend component code you must write tests for:\\n```jsx\\n' + $json.frontend_solution.code + '\\n```\\n\\nApp: ' + $json.description + '\\nBackend endpoints: ' + $json.backend.endpoints.join(', ') + '\\n\\nReply using EXACTLY this format:\\n\\n<<<FILENAME>>>\\n' + ($json.frontend_language == 'nextjs' ? 'page.test.js' : 'App.test.jsx') + '\\n<<<CODE>>>\\n// full test file here\\n<<<END>>>\\n\\nStrict rules:\\n- Read the frontend code above carefully - use the EXACT data-testid attributes, prop names, and state field names you see there\\n- import React from \\'react\\'\\n- import { render, screen, fireEvent, waitFor } from \\'@testing-library/react\\'\\n- import App from \\'./App\\'\\n- Mock ALL fetch() calls with jest.fn() - return realistic mock data matching the app data shape\\n- global.fetch = jest.fn() in beforeAll or beforeEach\\n- test_renders, test_shows_items, test_add_item, test_delete_item\\n- beforeEach: jest.clearAllMocks()\\n- NO real network calls\\n- These tests must pass when run against the CORRECT App.jsx frontend_solution above' }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 2500 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }]}) }}",
+        "options": {
+          "timeout": 60000
+        }
       },
-      "id": "node_parse_e2e_tests",
-      "name": "Parse E2E Tests",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [3500, 300]
+      "id": "4e182789-a659-478b-98fa-43f3ec84dc19",
+      "name": "Phase 4b - Frontend Tests",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        13536,
+        304
+      ]
     },
     {
       "parameters": {
-        "jsCode": "// Full context is chained forward through each parse node — read everything from $input\nconst data = $input.first().json;\n\nconst group_id = data.group_id;\nconst token    = data.token || '';\nconst db       = data.db;\nconst backend  = data.backend;\nconst frontend = data.frontend;\nconst test_backend  = data.test_backend;\nconst test_frontend = data.test_frontend;\nconst test_e2e      = data.test_e2e;\n\nif (!group_id)     throw new Error('Assemble: missing group_id');\nif (!db)           throw new Error('Assemble: missing db');\nif (!backend)      throw new Error('Assemble: missing backend');\nif (!frontend)     throw new Error('Assemble: missing frontend');\nif (!test_backend) throw new Error('Assemble: missing test_backend');\nif (!test_frontend)throw new Error('Assemble: missing test_frontend');\nif (!test_e2e)     throw new Error('Assemble: missing test_e2e');\n\nconst files = [\n  { category: 'frontend', fileName: frontend.fileName, code: frontend.code, permission: 'read-write', visibility: 'visible' },\n  { category: 'backend',  fileName: backend.fileName,  code: backend.code,  permission: 'read-write', visibility: 'visible' },\n  { category: 'db',       fileName: db.fileName,       code: db.code,       permission: 'read',       visibility: 'visible' },\n  { category: 'test', fileName: test_backend.fileName,  code: test_backend.code,  permission: 'read', visibility: 'hidden' },\n  { category: 'test', fileName: test_frontend.fileName, code: test_frontend.code, permission: 'read', visibility: 'hidden' },\n  { category: 'test', fileName: test_e2e.fileName,      code: test_e2e.code,      permission: 'read', visibility: 'hidden' }\n];\n\nreturn [{ json: { group_id, token, files } }];"
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key={{ $env.GEMINI_KEY }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are an E2E QA engineer. Write Cypress end-to-end tests.\\n\\nApp: ' + $json.description + '\\nFrontend: http://localhost:3000\\nBackend: http://localhost:5000\\nEndpoints:\\n' + $json.backend.endpoints.join('\\n') + '\\n\\ndata-testid attributes: item-list, item-row, add-form, name-input, submit-btn, delete-btn\\n\\nReply using EXACTLY this format:\\n\\n<<<FILENAME>>>\\ncypress/e2e/app.cy.js\\n<<<CODE>>>\\n// full Cypress test file here\\n<<<END>>>\\n\\nStrict rules:\\n- describe block named after the app\\n- beforeEach: cy.visit(\\'http://localhost:3000\\')\\n- test_page_loads, test_shows_existing_items, test_add_item, test_delete_item\\n- Use cy.intercept() for API stubs with aliases\\n- Use cy.get(\\'[data-testid=...]\\') selectors\\n- NO hardcoded waits â€” use cy.wait(\\'@alias\\')' }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 2500 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }] }) }}",
+        "options": {
+          "timeout": 60000
+        }
       },
-      "id": "node_assemble",
-      "name": "Assemble Output",
+      "id": "5fc697d2-5d5e-4129-9cfa-e231c82374fd",
+      "name": "Phase 4c - E2E Tests",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        13984,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-path",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "3e183c3c-b608-488d-b75f-0aeb1303b2cd",
+      "name": "Webhook1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        9952,
+        304
+      ],
+      "webhookId": "ai-path"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body ?? $input.first().json;\nconst group_id = body.group_id;\nconst description = body.description;\nconst frontend_language = body.frontend_language;\nconst backend_language = body.backend_language;\nconst db_style = body.db_style;\nconst token = body.token;\nif (!group_id || !description) throw new Error('Missing required fields: group_id, description');\n// Date.now() + Math.random() guarantees different bug_seed on every execution\nconst seedSource = `${group_id}|${Date.now()}|${Math.random()}`;\nconst bug_seed = Array.from(seedSource).reduce((acc, ch) => ((acc * 31 + ch.charCodeAt(0)) >>> 0), 7);\nreturn [{ json: { group_id, description, frontend_language: frontend_language || 'react', backend_language: backend_language || 'python', db_style: db_style || 'csv', token: token || '', bug_seed } }];"
+      },
+      "id": "8830f422-5409-40ca-8cbe-6795feb9ab85",
+      "name": "Parse Input1",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3720, 300]
+      "position": [
+        10176,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function extract(raw, tag) {\n  const open = '<<<' + tag + '>>>';\n  const next = raw.indexOf('<<<', raw.indexOf(open) + open.length);\n  const start = raw.indexOf(open) + open.length;\n  const end = next === -1 ? raw.length : next;\n  return raw.substring(start, end).trim();\n}\nconst raw = ($input.first().json.candidates?.[0]?.content?.parts?.[0]?.text) || '';\nif (!raw) throw new Error('Empty response from Gemini');\nconst fileName = extract(raw, 'FILENAME');\nconst schema_summary = extract(raw, 'SCHEMA_SUMMARY');\nconst code = extract(raw, 'CODE').replace('<<<END>>>', '').trim();\nif (!fileName || !code) throw new Error('Could not extract fields:\\n' + raw.substring(0, 400));\nconst prev = $('Parse Input1').first().json;\nreturn [{ json: { ...prev, db: { fileName, code, schema_summary } } }];"
+      },
+      "id": "8a3a6758-262b-40e5-b9e4-491b1dcee349",
+      "name": "Parse DB Output1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        10624,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function extract(raw, tag) {\n  const open = '<<<' + tag + '>>>';\n  const next = raw.indexOf('<<<', raw.indexOf(open) + open.length);\n  const start = raw.indexOf(open) + open.length;\n  const end = next === -1 ? raw.length : next;\n  return raw.substring(start, end).trim();\n}\nconst raw = ($input.first().json.candidates?.[0]?.content?.parts?.[0]?.text) || '';\nif (!raw) throw new Error('Empty response from Gemini');\nconst fileName = extract(raw, 'FILENAME');\nconst endpointsRaw = extract(raw, 'ENDPOINTS');\nconst code = extract(raw, 'CODE').replace('<<<END>>>', '').trim();\nconst endpoints = endpointsRaw.split('\\n').map(e => e.trim()).filter(Boolean);\nif (!fileName || !code) throw new Error('Could not extract fields:\\n' + raw.substring(0, 400));\nconst prev = $('Parse DB Output1').first().json;\nreturn [{ json: { ...prev, backend: { fileName: fileName || 'app.py', code, endpoints } } }];"
+      },
+      "id": "bbf9b721-85f8-4e01-a32b-3022f8be7702",
+      "name": "Parse Backend Output1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11072,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function extract(raw, tag) {\n  const open = '<<<' + tag + '>>>';\n  const next = raw.indexOf('<<<', raw.indexOf(open) + open.length);\n  const start = raw.indexOf(open) + open.length;\n  const end = next === -1 ? raw.length : next;\n  return raw.substring(start, end).trim();\n}\nconst raw = ($input.first().json.candidates?.[0]?.content?.parts?.[0]?.text) || '';\nconst prev = $('Parse Backend Output1').first().json;\n\nlet fixedCode = '';\ntry {\n  fixedCode = extract(raw, 'FIXED_CODE').replace('<<<END>>>', '').trim();\n} catch (e) {}\n\nif (!fixedCode || fixedCode.length < 50) {\n  fixedCode = prev.backend.code;\n}\n\nfixedCode = fixedCode.replace(/@app\\.before_first_request\\s*\\n(\\s*def \\w+\\(\\):[\\s\\S]*?)(?=\\n@|\\ndef |\\nclass |\\napp\\.run|\\nif __name__)/g, (match, fnBody) => {\n  const bodyLines = fnBody.split('\\n').slice(1).map(l => l.replace(/^    /, ''));\n  return '\\n' + bodyLines.join('\\n') + '\\n';\n});\nfixedCode = fixedCode.replace(/^```[\\w]*\\s*\\n?/gm, '').replace(/^```\\s*$/gm, '').trim();\nfixedCode = fixedCode.replace(/^#!\\/.*\\n?/m, '');\nfixedCode = fixedCode.replace(/^[a-z]*\\/bin\\/env\\s+\\w+[\\d.]*\\s*\\n?/m, '').trim();\n\nconst hasImport = /^(from |import )/m.test(fixedCode);\nif (!hasImport) {\n  fixedCode = 'from flask import Flask, request, jsonify, abort\\nfrom flask_cors import CORS\\nimport csv, os, json, uuid\\n\\n' + fixedCode;\n}\n\nreturn [{ json: { ...prev, backend_solution: { ...prev.backend, code: fixedCode }, backend_fixed: fixedCode } }];"
+      },
+      "id": "17e2b1aa-b67e-455e-befc-68ba90d21841",
+      "name": "Parse Validated Backend1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11520,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function extract(raw, tag) {\n  const open = '<<<' + tag + '>>>';\n  const next = raw.indexOf('<<<', raw.indexOf(open) + open.length);\n  const start = raw.indexOf(open) + open.length;\n  const end = next === -1 ? raw.length : next;\n  return raw.substring(start, end).trim();\n}\nconst raw = ($input.first().json.candidates?.[0]?.content?.parts?.[0]?.text) || '';\nif (!raw) throw new Error('Empty response from Gemini');\nconst fileName = extract(raw, 'FILENAME');\nconst code = extract(raw, 'CODE').replace('<<<END>>>', '').trim();\nif (!fileName || !code) throw new Error('Could not extract fields:\\n' + raw.substring(0, 400));\n\nconst prev = $('Parse Backend Bugs').first().json;\nconst resolvedName = fileName || 'App.jsx';\nreturn [{ json: { ...prev, frontend_solution: { fileName: resolvedName, code }, frontend: { fileName: resolvedName, code } } }];"
+      },
+      "id": "57c72660-a808-4ab2-bb1e-6ef7bb56f330",
+      "name": "Parse Frontend Output1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        12416,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function extract(raw, tag) {\n  const open  = '<<<' + tag + '>>>';\n  const start = raw.indexOf(open) + open.length;\n  const next  = raw.indexOf('<<<', start);\n  const end   = next === -1 ? raw.length : next;\n  return raw.substring(start, end).trim();\n}\nconst raw = ($input.first().json.candidates?.[0]?.content?.parts?.[0]?.text) || '';\nif (!raw) throw new Error('Empty response from Gemini (Backend Tests)');\nconst fileName = extract(raw, 'FILENAME');\nconst code     = extract(raw, 'CODE').replace('<<<END>>>', '').trim();\nif (!code) throw new Error('Could not extract backend test code:\\n' + raw.substring(0, 400));\n// Pull full state from Parse Frontend Bugs (which has backend, frontend_solution, backend_solution etc)\nconst prev = $('Parse Frontend Bugs').first().json;\nreturn [{ json: { ...prev, test_backend: { fileName: fileName || 'test_backend.py', code } } }];"
+      },
+      "id": "ba658a3e-864e-4d29-a072-82a6dd588665",
+      "name": "Parse Backend Tests1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        13312,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function extract(raw, tag) {\n  const open = '<<<' + tag + '>>>';\n  const next = raw.indexOf('<<<', raw.indexOf(open) + open.length);\n  const start = raw.indexOf(open) + open.length;\n  const end = next === -1 ? raw.length : next;\n  return raw.substring(start, end).trim();\n}\nconst raw = ($input.first().json.candidates?.[0]?.content?.parts?.[0]?.text) || '';\nif (!raw) throw new Error('Empty response from Gemini');\nconst fileName = extract(raw, 'FILENAME');\nlet code = extract(raw, 'CODE').replace('<<<END>>>', '').trim();\nif (!code) throw new Error('Could not extract frontend test code:\\n' + raw.substring(0, 400));\n\nif (!code.includes(\"@testing-library/jest-dom\")) {\n  code = code.replace(/(import\\s+React\\s+from\\s+['\"]react['\"];?\\s*\\n)/, \"$1import '@testing-library/jest-dom';\\n\");\n}\n\nconst appImportPattern = /^import\\s+App\\s+from\\s+['\"][^'\"]*App(?:\\.jsx|\\.js)?['\"];?\\s*$/m;\nif (appImportPattern.test(code)) {\n  const resolver = \"const loadApp = () => {\\n  const candidates = [\\n    './App',\\n    './App.jsx',\\n    './App.js',\\n    '../App',\\n    '../App.jsx',\\n    '../App.js',\\n    '../frontend/App',\\n    '../frontend/App.jsx',\\n    '../frontend/App.js',\\n    '../frontend/src/app/page',\\n    '../frontend/src/app/page.js',\\n    '../../frontend/src/app/page',\\n    '../../frontend/src/app/page.js',\\n    '../src/app/page',\\n    '../src/app/page.js'\\n  ];\\n\\n  for (const candidate of candidates) {\\n    try {\\n      const mod = require(candidate);\\n      return mod && mod.default ? mod.default : mod;\\n    } catch (error) {}\\n  }\\n\\n  throw new Error('Unable to resolve frontend component from known locations');\\n};\\nconst App = loadApp();\";\n  code = code.replace(appImportPattern, resolver);\n}\n\nconst prev = $('Parse Backend Tests1').first().json;\nreturn [{ json: { ...prev, test_frontend: { fileName: fileName || 'App.test.jsx', code } } }];"
+      },
+      "id": "54fcb3aa-989c-411f-aff6-17e66d51614d",
+      "name": "Parse Frontend Tests1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        13760,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function extract(raw, tag) {\n  const open = '<<<' + tag + '>>>';\n  const next = raw.indexOf('<<<', raw.indexOf(open) + open.length);\n  const start = raw.indexOf(open) + open.length;\n  const end = next === -1 ? raw.length : next;\n  return raw.substring(start, end).trim();\n}\nconst raw = ($input.first().json.candidates?.[0]?.content?.parts?.[0]?.text) || '';\nif (!raw) throw new Error('Empty response from Gemini');\nconst fileName = extract(raw, 'FILENAME');\nconst code = extract(raw, 'CODE').replace('<<<END>>>', '').trim();\nif (!code) throw new Error('Could not extract E2E test code:\\n' + raw.substring(0, 400));\nconst prev = $('Parse Frontend Tests1').first().json;\nreturn [{ json: { ...prev, test_e2e: { fileName: fileName || 'cypress/e2e/app.cy.js', code } } }];"
+      },
+      "id": "f5c7a0be-33f4-4458-af06-4ffea5527455",
+      "name": "Parse E2E Tests1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        14208,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Full context is chained forward through each parse node â€” read everything from $input\nconst data = $input.first().json;\n\nconst group_id = data.group_id;\nconst token    = data.token || '';\nconst db       = data.db;\nconst backend  = data.backend;\nconst frontend = data.frontend;\nconst backend_solution = data.backend_solution;\nconst frontend_solution = data.frontend_solution;\nconst test_backend  = data.test_backend;\nconst test_frontend = data.test_frontend;\nconst test_e2e      = data.test_e2e;\n\nif (!group_id)     throw new Error('Assemble: missing group_id');\nif (!db)           throw new Error('Assemble: missing db');\nif (!backend)      throw new Error('Assemble: missing backend');\nif (!frontend)     throw new Error('Assemble: missing frontend');\nif (!test_backend) throw new Error('Assemble: missing test_backend');\nif (!test_frontend)throw new Error('Assemble: missing test_frontend');\nif (!test_e2e)     throw new Error('Assemble: missing test_e2e');\n\nconst files = [\n  { category: 'frontend', fileName: frontend.fileName, code: frontend.code, permission: 'read-write', visibility: 'visible' },\n  { category: 'backend',  fileName: backend.fileName,  code: backend.code,  permission: 'read-write', visibility: 'visible' },\n  { category: 'db',       fileName: db.fileName,       code: db.code,       permission: 'read',       visibility: 'visible' },\n  { category: 'test', fileName: test_backend.fileName,  code: test_backend.code,  permission: 'read', visibility: 'hidden' },\n  { category: 'test', fileName: test_frontend.fileName, code: test_frontend.code, permission: 'read', visibility: 'hidden' },\n  { category: 'test', fileName: test_e2e.fileName,      code: test_e2e.code,      permission: 'read', visibility: 'hidden' }\n];\n\nif (backend_solution?.code) {\n  files.push({ category: 'solution', fileName: `backend/solution_${backend.fileName.split('/').pop()}`, code: backend_solution.code, permission: 'read', visibility: 'hidden' });\n}\nif (frontend_solution?.code) {\n  files.push({ category: 'solution', fileName: `frontend/solution_${frontend.fileName.split('/').pop()}`, code: frontend_solution.code, permission: 'read', visibility: 'hidden' });\n}\n\nreturn [{ json: { group_id, token, files } }];"
+      },
+      "id": "3ffc6d84-d09e-4174-b71e-fde2f9526a35",
+      "name": "Assemble Output1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        14432,
+        304
+      ]
     },
     {
       "parameters": {
@@ -219,96 +348,399 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "=Bearer {{ $json.token }}" },
-            { "name": "Content-Type", "value": "application/json" }
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ files: $json.files }) }}",
-        "options": { "timeout": 30000 }
+        "options": {
+          "timeout": 30000
+        }
       },
-      "id": "node_post_result",
-      "name": "POST to Backend",
+      "id": "1080f63d-a232-462f-9e1b-1aea32e958c2",
+      "name": "POST to Backend1",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [3940, 300]
+      "position": [
+        14656,
+        304
+      ]
     },
     {
       "parameters": {
-        "jsCode": "const result = $input.first().json;\nconst assembled = $('Assemble Output').first().json;\nreturn [{ json: {\n  success: true,\n  message: 'All phases complete. 6 files posted to backend.',\n  group_id: assembled.group_id,\n  files_generated: assembled.files.map(f => ({ category: f.category, fileName: f.fileName, permission: f.permission, visibility: f.visibility })),\n  backend_response: result\n} }];"
+        "jsCode": "const assembled = $('Assemble Output1').first().json;\n\n// Exclude test + solution files from the AI Tutor reference codebase\nconst codeFiles = assembled.files.filter(f => f.category !== 'test' && f.category !== 'solution');\n\nconst fullCodebase = codeFiles.map(f => {\n  return `// ─── ${f.category}/${f.fileName} ───\\n${f.code}`;\n}).join('\\n\\n');\n\nreturn [{ json: {\n  group_id: `group_${String(assembled.group_id)}`,\n  codebase: fullCodebase,\n  created_at: new Date().toISOString()\n} }];"
       },
-      "id": "node_respond",
-      "name": "Webhook Response",
+      "id": "39e60a4e-00cf-45da-b813-aff10b089230",
+      "name": "Concatenate Codebase1",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [4160, 300]
+      "position": [
+        14880,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://lnnupwiqtieirbctamvu.supabase.co/rest/v1/codebases",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ group_id: $json.group_id, codebase: $json.codebase, created_at: $json.created_at }) }}",
+        "options": {}
+      },
+      "id": "c8bae514-5275-4774-83e5-b8f32443bec9",
+      "name": "Upsert Codebase to Supabase1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        15104,
+        304
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "MF5E7sCv6njsUwGK",
+          "name": "Supabase account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const backendResult = $('POST to Backend1').first().json;\nconst assembled = $('Assemble Output1').first().json;\n\nreturn [{\n  json: {\n    success: true,\n    message: 'All phases complete. Files posted + codebase stored.',\n    group_id: assembled.group_id,\n    files_generated: assembled.files.map(f => ({\n      category: f.category,\n      fileName: f.fileName,\n      permission: f.permission,\n      visibility: f.visibility\n    })),\n    backend_response: backendResult\n  }\n}];"
+      },
+      "id": "8d5bcd45-7a6f-4ee8-ad0a-4f50065818b7",
+      "name": "Webhook Response1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15328,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: {\n  has_backend: !!$json.backend,\n  has_solution: !!$json.backend_solution,\n  backend_len: $json.backend?.code?.length,\n  solution_len: $json.backend_solution?.code?.length\n} }];"
+      },
+      "id": "d1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "Debug Backend State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        12192,
+        500
+      ]
     }
   ],
+  "pinData": {},
   "connections": {
-    "Webhook": {
-      "main": [[{ "node": "Parse Input", "type": "main", "index": 0 }]]
+    "POST to Backend1": {
+      "main": [
+        [
+          {
+            "node": "Concatenate Codebase1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Parse Input": {
-      "main": [[{ "node": "Phase 1 — Generate DB", "type": "main", "index": 0 }]]
+    "Phase 1 - Generate DB": {
+      "main": [
+        [
+          {
+            "node": "Parse DB Output1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Phase 1 — Generate DB": {
-      "main": [[{ "node": "Parse DB Output", "type": "main", "index": 0 }]]
+    "Phase 2 - Generate Backend": {
+      "main": [
+        [
+          {
+            "node": "Parse Backend Output1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Parse DB Output": {
-      "main": [[{ "node": "Phase 2 — Generate Backend", "type": "main", "index": 0 }]]
+    "Phase 2b - Validate & Fix Backend": {
+      "main": [
+        [
+          {
+            "node": "Parse Validated Backend1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Phase 2 — Generate Backend": {
-      "main": [[{ "node": "Parse Backend Output", "type": "main", "index": 0 }]]
+    "Phase 2c - Generate Backend Bugs": {
+      "main": [
+        [
+          {
+            "node": "Parse Backend Bugs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Parse Backend Output": {
-      "main": [[{ "node": "Phase 2b — Validate & Fix Backend", "type": "main", "index": 0 }]]
+    "Parse Backend Bugs": {
+      "main": [
+        [
+          {
+            "node": "Debug Backend State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Phase 2b — Validate & Fix Backend": {
-      "main": [[{ "node": "Parse Validated Backend", "type": "main", "index": 0 }]]
+    "Debug Backend State": {
+      "main": [
+        [
+          {
+            "node": "Phase 3 - Generate Frontend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Parse Validated Backend": {
-      "main": [[{ "node": "Phase 3 — Generate Frontend", "type": "main", "index": 0 }]]
+    "Phase 3 - Generate Frontend": {
+      "main": [
+        [
+          {
+            "node": "Parse Frontend Output1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Phase 3 — Generate Frontend": {
-      "main": [[{ "node": "Parse Frontend Output", "type": "main", "index": 0 }]]
+    "Phase 3b - Generate Frontend Bugs": {
+      "main": [
+        [
+          {
+            "node": "Parse Frontend Bugs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Parse Frontend Output": {
-      "main": [[{ "node": "Phase 4a — Backend Tests", "type": "main", "index": 0 }]]
+    "Parse Frontend Bugs": {
+      "main": [
+        [
+          {
+            "node": "Phase 4a - Backend Tests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Phase 4a — Backend Tests": {
-      "main": [[{ "node": "Parse Backend Tests", "type": "main", "index": 0 }]]
+    "Phase 4a - Backend Tests": {
+      "main": [
+        [
+          {
+            "node": "Parse Backend Tests1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Parse Backend Tests": {
-      "main": [[{ "node": "Phase 4b — Frontend Tests", "type": "main", "index": 0 }]]
+    "Phase 4b - Frontend Tests": {
+      "main": [
+        [
+          {
+            "node": "Parse Frontend Tests1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Phase 4b — Frontend Tests": {
-      "main": [[{ "node": "Parse Frontend Tests", "type": "main", "index": 0 }]]
+    "Phase 4c - E2E Tests": {
+      "main": [
+        [
+          {
+            "node": "Parse E2E Tests1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Parse Frontend Tests": {
-      "main": [[{ "node": "Phase 4c — E2E Tests", "type": "main", "index": 0 }]]
+    "Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Parse Input1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Phase 4c — E2E Tests": {
-      "main": [[{ "node": "Parse E2E Tests", "type": "main", "index": 0 }]]
+    "Parse Input1": {
+      "main": [
+        [
+          {
+            "node": "Phase 1 - Generate DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Parse E2E Tests": {
-      "main": [[{ "node": "Assemble Output", "type": "main", "index": 0 }]]
+    "Parse DB Output1": {
+      "main": [
+        [
+          {
+            "node": "Phase 2 - Generate Backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Assemble Output": {
-      "main": [[{ "node": "POST to Backend", "type": "main", "index": 0 }]]
+    "Parse Backend Output1": {
+      "main": [
+        [
+          {
+            "node": "Phase 2b - Validate & Fix Backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "POST to Backend": {
-      "main": [[{ "node": "Webhook Response", "type": "main", "index": 0 }]]
+    "Parse Validated Backend1": {
+      "main": [
+        [
+          {
+            "node": "Phase 2c - Generate Backend Bugs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Frontend Output1": {
+      "main": [
+        [
+          {
+            "node": "Phase 3b - Generate Frontend Bugs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Backend Tests1": {
+      "main": [
+        [
+          {
+            "node": "Phase 4b - Frontend Tests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Frontend Tests1": {
+      "main": [
+        [
+          {
+            "node": "Phase 4c - E2E Tests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse E2E Tests1": {
+      "main": [
+        [
+          {
+            "node": "Assemble Output1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Output1": {
+      "main": [
+        [
+          {
+            "node": "POST to Backend1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Concatenate Codebase1": {
+      "main": [
+        [
+          {
+            "node": "Upsert Codebase to Supabase1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Codebase to Supabase1": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
+  "active": true,
   "settings": {
     "executionOrder": "v1",
-    "saveManualExecutions": true,
-    "callerPolicy": "workflowsFromSameOwner"
+    "binaryMode": "separate"
   },
-  "staticData": null,
-  "pinData": {},
-  "versionId": "12",
-  "triggerCount": 0,
+  "versionId": "c2c1f07a-728b-4104-8e44-a5c76e84e0f5",
+  "meta": {
+    "instanceId": "d445d430e2931b2cc6b953455308d26e02e550638bf47a6f809ddd9d2597c026"
+  },
+  "id": "DFHB4qsKt0lNfawz",
   "tags": []
 }

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import api from '@/lib/api';
 import Navbar from '@/components/Navbar';
+import TutorChat from '@/components/TutorChat';
 import Link from 'next/link';
 
 // ─── Constants ───
@@ -141,7 +142,7 @@ function AddFileModal({ onClose, onCreated, groupId, isAdmin }) {
 }
 
 // ─── AI Mode Constants ───
-const N8N_WEBHOOK_BASE = 'http://localhost:5678/webhook-test/ai-path';
+const N8N_WEBHOOK_BASE = 'http://localhost:5678/webhook/ai-path';
 function getN8nWebhookUrl(groupId) {
   return `${N8N_WEBHOOK_BASE}`;
 }
@@ -202,7 +203,7 @@ function AiModeModal({ onClose, onFilesGenerated, groupId }) {
 
       const response = await fetch(getN8nWebhookUrl(groupId), {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'ngrok-skip-browser-warning': 'true'
         },
@@ -220,6 +221,8 @@ function AiModeModal({ onClose, onFilesGenerated, groupId }) {
         setGeneratedFiles(data.files_generated || []);
         setStep('done');
         setProgress(`✓ Successfully generated and imported ${data.backend_response.files_created} files!`);
+
+        // n8n stores the codebase in Supabase directly — no extra call needed
         onFilesGenerated(data.backend_response.files);
         return;
       }
@@ -267,6 +270,9 @@ function AiModeModal({ onClose, onFilesGenerated, groupId }) {
 
       setStep('done');
       setProgress(`✓ Successfully created ${createdFiles.length} files!`);
+
+      // n8n stores the codebase in Supabase directly — no extra call needed
+      console.log('[AI Mode] Files created:', createdFiles.length, '— codebase stored by n8n');
       onFilesGenerated(createdFiles);
     } catch (err) {
       setError(err.message);
@@ -462,6 +468,7 @@ export default function GroupDetailPage({ params }) {
   const [viewMode, setViewMode] = useState('template'); // 'template' | 'member'
   const [memberVersion, setMemberVersion] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [clientScores, setClientScores] = useState({});
 
   // Hidden files
   const [showHidden, setShowHidden] = useState(true);
@@ -471,6 +478,9 @@ export default function GroupDetailPage({ params }) {
   const [testResults, setTestResults] = useState(null);
   const [showTerminal, setShowTerminal] = useState(false);
   const [activeTerminalTab, setActiveTerminalTab] = useState('full');
+
+  // AI Tutor chat panel
+  const [showTutorChat, setShowTutorChat] = useState(false);
 
   const editorRef = useRef(null);
   const lineNumbersRef = useRef(null);
@@ -506,6 +516,7 @@ export default function GroupDetailPage({ params }) {
   const lineCount = editorContent.split('\n').length;
   const isDbFile = selectedFile?.filename?.startsWith('db/');
   const canEdit = (isAdmin && viewMode === 'template') || (!isAdmin && !isDbFile && !selectedFile?.is_readonly && !selectedFile?.is_hidden);
+  const visibleFiles = files.filter(f => !f.is_hidden);
 
   function toggleFolder(path) {
     setCollapsedFolders(prev => {
@@ -561,6 +572,18 @@ export default function GroupDetailPage({ params }) {
     setSelectedFileId(null);
     setMemberVersion(null);
     setEditorContent('');
+
+    // Fetch scores from n8n through our API proxy
+    if (!clientScores[member.id]) {
+      try {
+        const res = await fetch(`/api/scores?group_id=group_${groupId}&candidate_name=${encodeURIComponent(member.username)}`);
+        const data = await res.json();
+        setClientScores(prev => ({ ...prev, [member.id]: data }));
+      } catch (err) {
+        console.error("Failed to fetch scores:", err);
+        setClientScores(prev => ({ ...prev, [member.id]: { found: false, error: err.message } }));
+      }
+    }
   }
 
   async function openMemberFile(member, file) {
@@ -674,7 +697,7 @@ export default function GroupDetailPage({ params }) {
       await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (e) {}
+    } catch (e) { }
   }
 
   async function runTests() {
@@ -771,14 +794,35 @@ export default function GroupDetailPage({ params }) {
                   👥
                   {members.length > 0 && <span className="activity-badge">{members.length}</span>}
                 </button>
-                <div style={{ marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--border-subtle)' }}>
-                  <button className="ide-activity-btn ai-mode-activity-btn"
-                    onClick={() => setShowAiMode(true)} title="AI Mode">
-                    ✦
-                  </button>
-                </div>
               </>
             )}
+            <div style={{ marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {!isAdmin && (
+                <button
+                  className={`ide-activity-btn ${showTutorChat ? 'active' : ''}`}
+                  onClick={() => setShowTutorChat(prev => !prev)}
+                  title="AI Socratic Tutor"
+                  style={{
+                    background: showTutorChat ? 'linear-gradient(135deg, rgba(108, 99, 255, 0.25), rgba(0, 212, 255, 0.25))' : undefined,
+                    borderLeftColor: showTutorChat ? '#6c63ff' : undefined,
+                  }}
+                >
+                  🤖
+                </button>
+              )}
+              {isAdmin && (
+                <button className={`ide-activity-btn ${activePanel === 'scores' ? 'active' : ''}`}
+                  onClick={() => setActivePanel('scores')} title="Candidate Scores">
+                  📊
+                </button>
+              )}
+              {isAdmin && (
+                <button className="ide-activity-btn ai-mode-activity-btn"
+                  onClick={() => setShowAiMode(true)} title="AI Mode">
+                  ✦
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Sidebar */}
@@ -865,367 +909,459 @@ export default function GroupDetailPage({ params }) {
                 </div>
               </>
             )}
-          </div>
 
-          {/* Editor Area */}
-          <div className="ide-editor-area">
-            {/* Tabs */}
-            {openTabs.length > 0 && (
-              <div className="ide-tabs-v2">
-                {openTabs.map(tab => (
-                  <div key={tab.id}
-                    className={`ide-tab-v2 ${selectedFileId === tab.id ? 'active' : ''}`}
-                    onClick={() => {
-                      const file = files.find(f => f.id === tab.id);
-                      if (file) openFile(file);
-                    }}>
-                    <span className="tab-icon">{getFileIcon(tab.language)}</span>
-                    <span>{getBasename(tab.filename)}</span>
-                    {tab.is_hidden && <span className="tab-badge tab-badge-hidden">hidden</span>}
-                    {viewMode === 'member' && selectedMemberId && selectedFileId === tab.id && (
-                      <span className="tab-badge tab-badge-member">{selectedMember?.username}</span>
-                    )}
-                    <button className="tab-close" onClick={(e) => closeTab(tab.id, e)}>✕</button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {viewMode === 'client_overview' && selectedMember ? (
-              <div className="client-overview">
-                <div className="client-overview-header">
-                  <div className="client-overview-avatar">
-                    {selectedMember.username.charAt(0).toUpperCase()}
-                  </div>
-                  <div className="client-overview-info">
-                    <h2>{selectedMember.username}</h2>
-                    <p>{selectedMember.email}</p>
-                  </div>
-                </div>
-
-                {selectedMember.profile && selectedMember.profile.length > 0 && (
-                  <div className="client-profile-grid">
-                    {selectedMember.profile.map((pv, i) => (
-                      <div className="client-profile-card" key={i}>
-                        <div className="label">{pv.field_name}</div>
-                        <div className="value">{pv.value}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="client-files-section">
-                  <h3>📁 Client Workspace Files</h3>
-                  <div className="client-files-grid">
-                    {visibleFiles.map(file => (
-                      <button key={file.id} className="client-file-btn" onClick={() => openMemberFile(selectedMember, file)}>
-                        <div className="client-file-icon">{getFileIcon(file.language)}</div>
-                        <div className="client-file-meta">
-                          <span className="client-file-name">{getBasename(file.filename)}</span>
-                          <span className="client-file-lang">{file.language}</span>
-                        </div>
-                      </button>
-                    ))}
-                    {visibleFiles.length === 0 && (
-                      <p style={{ color: 'var(--text-muted)' }}>No files available in this group workspace yet.</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ) : selectedFile ? (
+            {activePanel === 'scores' && isAdmin && (
               <>
-                {/* Breadcrumb */}
-                <div className="ide-breadcrumb">
-                  <span>{group.name}</span>
-                  {breadcrumbParts.map((part, i) => (
-                    <span key={i}>
-                      <span className="separator"> › </span>
-                      <span>{part}</span>
-                    </span>
+                <div className="ide-panel-title">
+                  <span>Candidate Scores</span>
+                </div>
+                <div className="ide-members-list" style={{ flex: 1, padding: 0 }}>
+                  <div style={{ padding: '16px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                    Select a candidate to view their AI Tutor evaluation scores.
+                  </div>
+                  {members.map(member => (
+                    <div key={member.id}
+                      className={`ide-member-row ${selectedMemberId === member.id ? 'active' : ''}`}
+                      onClick={() => selectMember(member)}>
+                      <div className="ide-member-dot" style={{ background: 'var(--accent-magenta)' }}>📊</div>
+                      <div className="ide-member-detail">
+                        <div className="ide-member-username">{member.username}</div>
+                        <div className="ide-member-status">Click to fetch scores</div>
+                      </div>
+                    </div>
                   ))}
-                  {viewMode === 'member' && selectedMember && (
-                    <>
-                      <span className="separator"> — </span>
-                      <span style={{ color: 'var(--accent-green)' }}>👤 {selectedMember.username}&apos;s version</span>
-                    </>
-                  )}
-                </div>
-
-                {/* Toolbar */}
-                <div className="ide-toolbar-v2">
-                  <div className="ide-toolbar-left">
-                    {viewMode === 'member' && selectedMember && (
-                      <button
-                        className="btn btn-ghost"
-                        style={{ padding: '2px 8px', fontSize: '0.75rem', border: '1px solid var(--border-subtle)', borderRadius: '4px' }}
-                        onClick={() => {
-                          setViewMode('client_overview');
-                          setSelectedFileId(null);
-                          setEditorContent('');
-                        }}
-                      >
-                        ← Back to Overview
-                      </button>
-                    )}
-                    <span className="ide-lang-badge">{selectedFile.language}</span>
-
-                    {isAdmin && viewMode === 'template' && (
-                      <button
-                        className={`ide-activity-btn ${selectedFile.is_readonly ? 'active' : ''}`}
-                        onClick={async () => {
-                          try {
-                            await api.updateFile(groupId, selectedFile.id, { is_readonly: !selectedFile.is_readonly });
-                            setFiles(files.map(f => f.id === selectedFile.id ? { ...f, is_readonly: !selectedFile.is_readonly } : f));
-                          } catch (e) {
-                            console.error(e);
-                          }
-                        }}
-                        title="Toggle Read-Only for Clients"
-                        style={{ padding: '2px 6px', fontSize: '0.9rem', height: 'auto', border: selectedFile.is_readonly ? '1px solid var(--accent-warning)' : '1px solid rgba(255,255,255,0.1)' }}
-                      >
-                        {selectedFile.is_readonly ? '🔒 Locked' : '🔓 Unlocked'}
-                      </button>
-                    )}
-
-                    {selectedFile.is_hidden && <span className="ide-readonly-badge">🔒 Hidden</span>}
-                    {!isAdmin && selectedFile.is_readonly && <span className="ide-readonly-badge">🔒 Locked</span>}
-                    {(viewMode === 'member' || (!isAdmin && (selectedFile.is_readonly || selectedFile.filename?.startsWith('db/')))) && <span className="ide-readonly-badge">👁 Read-only</span>}
-                  </div>
-                  <div className="ide-toolbar-right" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                    <button
-                      className="ide-run-btn"
-                      onClick={runTests}
-                      disabled={testRunning}
-                      title="Run Tests in Docker Container"
-                      style={{
-                        padding: '3px 12px', fontSize: '0.8rem', fontWeight: 600,
-                        border: '1px solid rgba(76,175,80,0.4)', borderRadius: '4px',
-                        background: testRunning ? 'rgba(255,193,7,0.15)' : 'rgba(76,175,80,0.12)',
-                        color: testRunning ? '#ffc107' : '#4caf50',
-                        cursor: testRunning ? 'wait' : 'pointer',
-                        display: 'flex', alignItems: 'center', gap: '6px',
-                        transition: 'all 0.2s',
-                      }}
-                    >
-                      {testRunning ? (
-                        <><span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span> Running...</>
-                      ) : (
-                        <>▶ Run Tests</>
-                      )}
-                    </button>
-                    {showTerminal && (
-                      <button
-                        onClick={() => setShowTerminal(false)}
-                        title="Hide Terminal"
-                        style={{
-                          padding: '3px 8px', fontSize: '0.75rem',
-                          border: '1px solid var(--border-subtle)', borderRadius: '4px',
-                          background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer',
-                        }}
-                      >
-                        ✕ Terminal
-                      </button>
-                    )}
-                    {canEdit && viewMode === 'template' && (
-                      <div className={`ide-save-dot ${saveStatus}`}>
-                        {saveStatus === 'saved' && '✓ Saved'}
-                        {saveStatus === 'saving' && '⏳ Saving...'}
-                        {saveStatus === 'unsaved' && '● Unsaved'}
-                      </div>
-                    )}
-                    {!isAdmin && (
-                      <div className={`ide-save-dot ${saveStatus}`}>
-                        {saveStatus === 'saved' && '✓ Saved'}
-                        {saveStatus === 'saving' && '⏳ Saving...'}
-                        {saveStatus === 'unsaved' && '● Unsaved'}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Editor */}
-                <div className="ide-editor-wrap">
-                  <div className="ide-line-numbers" ref={lineNumbersRef}>
-                    {Array.from({ length: lineCount }, (_, i) => (
-                      <div key={i}>{i + 1}</div>
-                    ))}
-                  </div>
-                  {canEdit && viewMode !== 'member' ? (
-                    <textarea ref={editorRef} className="ide-textarea"
-                      value={editorContent}
-                      onChange={(e) => handleEditorChange(e.target.value)}
-                      onScroll={handleEditorScroll}
-                      onKeyDown={handleKeyDown}
-                      spellCheck={false}
-                      placeholder="// Start writing code..."
-                      id="code-editor" />
-                  ) : (
-                    <div className="ide-code-display" ref={editorRef} onScroll={handleEditorScroll}>
-                      {editorContent || '// Empty file'}
+                  {members.length === 0 && (
+                    <div style={{ padding: '24px 16px', color: 'var(--text-muted)', fontSize: '0.78rem', textAlign: 'center' }}>
+                      No clients have joined yet.
                     </div>
                   )}
                 </div>
+              </>
+            )}
+          </div>
 
-                {/* Terminal Output Panel */}
-                {showTerminal && (
-                  <div className="ide-terminal-panel" style={{
-                    borderTop: '2px solid var(--border-subtle)',
-                    background: '#0d1117',
-                    minHeight: '180px',
-                    maxHeight: '320px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    flexShrink: 0,
-                  }}>
-                    {/* Terminal tabs */}
-                    <div style={{
-                      display: 'flex', alignItems: 'center', gap: '0',
-                      borderBottom: '1px solid rgba(255,255,255,0.08)',
-                      background: '#161b22',
-                      padding: '0 8px',
-                      flexShrink: 0,
-                    }}>
-                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginRight: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Terminal</span>
-                      {['full', 'backend', 'frontend'].map(tab => (
-                        <button key={tab}
-                          onClick={() => setActiveTerminalTab(tab)}
-                          style={{
-                            padding: '6px 14px', fontSize: '0.75rem', fontWeight: 500,
-                            border: 'none', borderBottom: activeTerminalTab === tab ? '2px solid #58a6ff' : '2px solid transparent',
-                            background: 'transparent', cursor: 'pointer',
-                            color: activeTerminalTab === tab ? '#e6edf3' : '#8b949e',
-                            transition: 'all 0.15s',
-                          }}
-                        >
-                          {tab === 'full' && '📺 Full Output'}
-                          {tab === 'backend' && (
-                            <span>
-                              {testResults?.backend_tests?.status === 'passed' ? '✅' : testResults?.backend_tests?.status === 'failed' ? '❌' : '🐍'} Backend
-                            </span>
-                          )}
-                          {tab === 'frontend' && (
-                            <span>
-                              {testResults?.frontend_tests?.status === 'passed' ? '✅' : testResults?.frontend_tests?.status === 'failed' ? '❌' : '📜'} Frontend
-                            </span>
-                          )}
+          {/* Editor + Chat Wrapper */}
+          <div style={{ flex: 1, display: 'flex', minWidth: 0 }}>
+
+            {/* Editor Area */}
+            <div className="ide-editor-area" style={{ flex: showTutorChat ? 7 : 1 }}>
+              {/* Tabs */}
+              {openTabs.length > 0 && (
+                <div className="ide-tabs-v2">
+                  {openTabs.map(tab => (
+                    <div key={tab.id}
+                      className={`ide-tab-v2 ${selectedFileId === tab.id ? 'active' : ''}`}
+                      onClick={() => {
+                        const file = files.find(f => f.id === tab.id);
+                        if (file) openFile(file);
+                      }}>
+                      <span className="tab-icon">{getFileIcon(tab.language)}</span>
+                      <span>{getBasename(tab.filename)}</span>
+                      {tab.is_hidden && <span className="tab-badge tab-badge-hidden">hidden</span>}
+                      {viewMode === 'member' && selectedMemberId && selectedFileId === tab.id && (
+                        <span className="tab-badge tab-badge-member">{selectedMember?.username}</span>
+                      )}
+                      <button className="tab-close" onClick={(e) => closeTab(tab.id, e)}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {viewMode === 'client_overview' && selectedMember ? (
+                <div className="client-overview">
+                  <div className="client-overview-header">
+                    <div className="client-overview-avatar">
+                      {selectedMember.username.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="client-overview-info">
+                      <h2>{selectedMember.username}</h2>
+                      <p>{selectedMember.email}</p>
+                    </div>
+                  </div>
+
+                  <div className="client-profile-grid">
+                    <div className="client-profile-card">
+                      <div className="label">Role</div>
+                      <div className="value">Candidate / Client</div>
+                    </div>
+                    <div className="client-profile-card">
+                      <div className="label">Status</div>
+                      <div className="value" style={{ color: 'var(--accent-green)' }}>● Active in Workspace</div>
+                    </div>
+                    <div className="client-profile-card">
+                      <div className="label">Joined</div>
+                      <div className="value">{new Date(selectedMember.created_at).toLocaleDateString()}</div>
+                    </div>
+                  </div>
+
+                  {/* AI Tutor Scores Section */}
+                  <div className="client-files-section" style={{ marginBottom: 40 }}>
+                    <h3>🤖 AI Socratic Tutor Evaluation</h3>
+                    {clientScores[selectedMember.id] ? (
+                      clientScores[selectedMember.id].found ? (
+                        <div style={{ background: 'var(--bg-glass)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', padding: 24, animation: 'fadeUp 0.6s ease-out' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, paddingBottom: 16, borderBottom: '1px dashed var(--border-subtle)' }}>
+                            <div>
+                              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1 }}>Interactions</span>
+                              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--accent-blue)' }}>{clientScores[selectedMember.id].turn_count} turns</div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1 }}>Last Updated</span>
+                              <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                                {new Date(clientScores[selectedMember.id].updated_at).toLocaleString()}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 16 }}>
+                            {Object.entries(clientScores[selectedMember.id].current_ema_scores || {}).map(([metric, score]) => (
+                              <div key={metric} style={{ background: 'rgba(0,0,0,0.2)', padding: 16, borderRadius: 'var(--radius-sm)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 }}>{metric.replace('_ema', '')}</div>
+                                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+                                  <span style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-bright)', lineHeight: 1 }}>{score}</span>
+                                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', paddingBottom: 4 }}>/ 10</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ padding: '24px 16px', color: 'var(--text-muted)', fontSize: '0.85rem', background: 'var(--bg-glass)', borderRadius: 'var(--radius-md)', border: '1px dashed var(--border-subtle)' }}>
+                          No interaction data found for this candidate yet.
+                        </div>
+                      )
+                    ) : (
+                      <div style={{ padding: '24px 16px', color: 'var(--text-muted)', fontSize: '0.85rem', background: 'var(--bg-glass)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+                        <span className="spinner" style={{ width: 16, height: 16, borderWidth: 2, marginRight: 8, display: 'inline-block', verticalAlign: 'middle' }}></span>
+                        Fetching evaluation scores...
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="client-files-section">
+                    <h3>📁 Client Workspace Files</h3>
+                    <div className="client-files-grid">
+                      {visibleFiles.map(file => (
+                        <button key={file.id} className="client-file-btn" onClick={() => openMemberFile(selectedMember, file)}>
+                          <div className="client-file-icon">{getFileIcon(file.language)}</div>
+                          <div className="client-file-meta">
+                            <span className="client-file-name">{getBasename(file.filename)}</span>
+                            <span className="client-file-lang">{file.language}</span>
+                          </div>
                         </button>
                       ))}
-                      {testResults && (
-                        <span style={{ marginLeft: 'auto', fontSize: '0.7rem', color: '#8b949e', paddingRight: '8px' }}>
-                          ⏱ {testResults.duration}s
+                      {visibleFiles.length === 0 && (
+                        <p style={{ color: 'var(--text-muted)' }}>No files available in this group workspace yet.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : selectedFile ? (
+                <>
+                  {/* Breadcrumb */}
+                  <div className="ide-breadcrumb">
+                    <span>{group.name}</span>
+                    {breadcrumbParts.map((part, i) => (
+                      <span key={i}>
+                        <span className="separator"> › </span>
+                        <span>{part}</span>
+                      </span>
+                    ))}
+                    {viewMode === 'member' && selectedMember && (
+                      <>
+                        <span className="separator"> — </span>
+                        <span style={{ color: 'var(--accent-green)' }}>👤 {selectedMember.username}&apos;s version</span>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Toolbar */}
+                  <div className="ide-toolbar-v2">
+                    <div className="ide-toolbar-left">
+                      {viewMode === 'member' && selectedMember && (
+                        <button
+                          className="btn btn-ghost"
+                          style={{ padding: '2px 8px', fontSize: '0.75rem', border: '1px solid var(--border-subtle)', borderRadius: '4px' }}
+                          onClick={() => {
+                            setViewMode('client_overview');
+                            setSelectedFileId(null);
+                            setEditorContent('');
+                          }}
+                        >
+                          ← Back to Overview
+                        </button>
+                      )}
+                      <span className="ide-lang-badge">{selectedFile.language}</span>
+
+                      {isAdmin && viewMode === 'template' && (
+                        <button
+                          className={`ide-activity-btn ${selectedFile.is_readonly ? 'active' : ''}`}
+                          onClick={async () => {
+                            try {
+                              await api.updateFile(groupId, selectedFile.id, { is_readonly: !selectedFile.is_readonly });
+                              setFiles(files.map(f => f.id === selectedFile.id ? { ...f, is_readonly: !selectedFile.is_readonly } : f));
+                            } catch (e) {
+                              console.error(e);
+                            }
+                          }}
+                          title="Toggle Read-Only for Clients"
+                          style={{ padding: '2px 6px', fontSize: '0.9rem', height: 'auto', border: selectedFile.is_readonly ? '1px solid var(--accent-warning)' : '1px solid rgba(255,255,255,0.1)' }}
+                        >
+                          {selectedFile.is_readonly ? '🔒 Locked' : '🔓 Unlocked'}
+                        </button>
+                      )}
+
+                      {selectedFile.is_hidden && <span className="ide-readonly-badge">🔒 Hidden</span>}
+                      {!isAdmin && selectedFile.is_readonly && <span className="ide-readonly-badge">🔒 Locked</span>}
+                      {(viewMode === 'member' || (!isAdmin && (selectedFile.is_readonly || selectedFile.filename?.startsWith('db/')))) && <span className="ide-readonly-badge">👁 Read-only</span>}
+                    </div>
+                    <div className="ide-toolbar-right" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                      <button
+                        className="ide-run-btn"
+                        onClick={runTests}
+                        disabled={testRunning}
+                        title="Run Tests in Docker Container"
+                        style={{
+                          padding: '3px 12px', fontSize: '0.8rem', fontWeight: 600,
+                          border: '1px solid rgba(76,175,80,0.4)', borderRadius: '4px',
+                          background: testRunning ? 'rgba(255,193,7,0.15)' : 'rgba(76,175,80,0.12)',
+                          color: testRunning ? '#ffc107' : '#4caf50',
+                          cursor: testRunning ? 'wait' : 'pointer',
+                          display: 'flex', alignItems: 'center', gap: '6px',
+                          transition: 'all 0.2s',
+                        }}
+                      >
+                        {testRunning ? (
+                          <><span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span> Running...</>
+                        ) : (
+                          <>▶ Run Tests</>
+                        )}
+                      </button>
+                      {showTerminal && (
+                        <button
+                          onClick={() => setShowTerminal(false)}
+                          title="Hide Terminal"
+                          style={{
+                            padding: '3px 8px', fontSize: '0.75rem',
+                            border: '1px solid var(--border-subtle)', borderRadius: '4px',
+                            background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer',
+                          }}
+                        >
+                          ✕ Terminal
+                        </button>
+                      )}
+                      {canEdit && viewMode === 'template' && (
+                        <div className={`ide-save-dot ${saveStatus}`}>
+                          {saveStatus === 'saved' && '✓ Saved'}
+                          {saveStatus === 'saving' && '⏳ Saving...'}
+                          {saveStatus === 'unsaved' && '● Unsaved'}
+                        </div>
+                      )}
+                      {!isAdmin && (
+                        <div className={`ide-save-dot ${saveStatus}`}>
+                          {saveStatus === 'saved' && '✓ Saved'}
+                          {saveStatus === 'saving' && '⏳ Saving...'}
+                          {saveStatus === 'unsaved' && '● Unsaved'}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Editor */}
+                  <div className="ide-editor-wrap">
+                    <div className="ide-line-numbers" ref={lineNumbersRef}>
+                      {Array.from({ length: lineCount }, (_, i) => (
+                        <div key={i}>{i + 1}</div>
+                      ))}
+                    </div>
+                    {canEdit && viewMode !== 'member' ? (
+                      <textarea ref={editorRef} className="ide-textarea"
+                        value={editorContent}
+                        onChange={(e) => handleEditorChange(e.target.value)}
+                        onScroll={handleEditorScroll}
+                        onKeyDown={handleKeyDown}
+                        spellCheck={false}
+                        placeholder="// Start writing code..."
+                        id="code-editor" />
+                    ) : (
+                      <div className="ide-code-display" ref={editorRef} onScroll={handleEditorScroll}>
+                        {editorContent || '// Empty file'}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Terminal Output Panel */}
+                  {showTerminal && (
+                    <div className="ide-terminal-panel" style={{
+                      borderTop: '2px solid var(--border-subtle)',
+                      background: '#0d1117',
+                      minHeight: '180px',
+                      maxHeight: '320px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      flexShrink: 0,
+                    }}>
+                      {/* Terminal tabs */}
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: '0',
+                        borderBottom: '1px solid rgba(255,255,255,0.08)',
+                        background: '#161b22',
+                        padding: '0 8px',
+                        flexShrink: 0,
+                      }}>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginRight: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Terminal</span>
+                        {['full', 'backend', 'frontend'].map(tab => (
+                          <button key={tab}
+                            onClick={() => setActiveTerminalTab(tab)}
+                            style={{
+                              padding: '6px 14px', fontSize: '0.75rem', fontWeight: 500,
+                              border: 'none', borderBottom: activeTerminalTab === tab ? '2px solid #58a6ff' : '2px solid transparent',
+                              background: 'transparent', cursor: 'pointer',
+                              color: activeTerminalTab === tab ? '#e6edf3' : '#8b949e',
+                              transition: 'all 0.15s',
+                            }}
+                          >
+                            {tab === 'full' && '📺 Full Output'}
+                            {tab === 'backend' && (
+                              <span>
+                                {testResults?.backend_tests?.status === 'passed' ? '✅' : testResults?.backend_tests?.status === 'failed' ? '❌' : '🐍'} Backend
+                              </span>
+                            )}
+                            {tab === 'frontend' && (
+                              <span>
+                                {testResults?.frontend_tests?.status === 'passed' ? '✅' : testResults?.frontend_tests?.status === 'failed' ? '❌' : '📜'} Frontend
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                        {testResults && (
+                          <span style={{ marginLeft: 'auto', fontSize: '0.7rem', color: '#8b949e', paddingRight: '8px' }}>
+                            ⏱ {testResults.duration}s
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Terminal content */}
+                      <div ref={terminalRef} style={{
+                        flex: 1,
+                        overflowY: 'auto',
+                        padding: '12px 16px',
+                        fontFamily: '"Cascadia Code", "Fira Code", "JetBrains Mono", "Consolas", monospace',
+                        fontSize: '0.78rem',
+                        lineHeight: '1.6',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                        color: '#c9d1d9',
+                      }}>
+                        {testRunning && (
+                          <div style={{ color: '#ffc107' }}>
+                            ⟳ Spinning up Docker container and running tests...
+                            <br />This may take 20-60 seconds for the first run.
+                            <div style={{ marginTop: '12px' }}>
+                              <div className="terminal-progress-bar" style={{
+                                height: '3px', background: 'rgba(255,255,255,0.05)', borderRadius: '2px', overflow: 'hidden',
+                              }}>
+                                <div style={{
+                                  height: '100%', background: 'linear-gradient(90deg, #ffc107, #ff9800, #ffc107)',
+                                  animation: 'terminalProgress 2s ease-in-out infinite',
+                                  width: '40%',
+                                }} />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {!testRunning && !testResults && (
+                          <div style={{ color: '#8b949e' }}>
+                            Click "▶ Run Tests" to execute your test suites in an isolated Docker container.
+                            <br />Your backend (pytest) and frontend (Jest) tests will run automatically.
+                          </div>
+                        )}
+                        {testResults && !testRunning && (
+                          <>
+                            {activeTerminalTab === 'full' && (testResults.full_output || 'No output.')}
+                            {activeTerminalTab === 'backend' && (
+                              <>
+                                <div style={{ marginBottom: '8px', fontWeight: 600, color: testResults.backend_tests.status === 'passed' ? '#4caf50' : testResults.backend_tests.status === 'failed' ? '#f44336' : '#ffc107' }}>
+                                  Status: {testResults.backend_tests.status.toUpperCase()}
+                                </div>
+                                {testResults.backend_tests.output || 'No backend test output.'}
+                              </>
+                            )}
+                            {activeTerminalTab === 'frontend' && (
+                              <>
+                                <div style={{ marginBottom: '8px', fontWeight: 600, color: testResults.frontend_tests.status === 'passed' ? '#4caf50' : testResults.frontend_tests.status === 'failed' ? '#f44336' : '#ffc107' }}>
+                                  Status: {testResults.frontend_tests.status.toUpperCase()}
+                                </div>
+                                {testResults.frontend_tests.output || 'No frontend test output.'}
+                              </>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Status bar */}
+                  <div className="ide-statusbar-v2">
+                    <div>
+                      <span className="status-item">⬡ GroupHub</span>
+                      <span className="status-item">Ln {lineCount}, Col 1</span>
+                    </div>
+                    <div>
+                      <span className="status-item">{selectedFile.language}</span>
+                      <span className="status-item">UTF-8</span>
+                      <span className="status-item">Spaces: 2</span>
+                      {viewMode === 'member' && selectedMember && (
+                        <span className="status-item" style={{ color: 'rgba(255,255,255,0.7)' }}>
+                          Viewing: {selectedMember.username}
                         </span>
                       )}
                     </div>
-
-                    {/* Terminal content */}
-                    <div ref={terminalRef} style={{
-                      flex: 1,
-                      overflowY: 'auto',
-                      padding: '12px 16px',
-                      fontFamily: '"Cascadia Code", "Fira Code", "JetBrains Mono", "Consolas", monospace',
-                      fontSize: '0.78rem',
-                      lineHeight: '1.6',
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                      color: '#c9d1d9',
-                    }}>
-                      {testRunning && (
-                        <div style={{ color: '#ffc107' }}>
-                          ⟳ Spinning up Docker container and running tests...
-                          <br />This may take 20-60 seconds for the first run.
-                          <div style={{ marginTop: '12px' }}>
-                            <div className="terminal-progress-bar" style={{
-                              height: '3px', background: 'rgba(255,255,255,0.05)', borderRadius: '2px', overflow: 'hidden',
-                            }}>
-                              <div style={{
-                                height: '100%', background: 'linear-gradient(90deg, #ffc107, #ff9800, #ffc107)',
-                                animation: 'terminalProgress 2s ease-in-out infinite',
-                                width: '40%',
-                              }} />
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                      {!testRunning && !testResults && (
-                        <div style={{ color: '#8b949e' }}>
-                          Click "▶ Run Tests" to execute your test suites in an isolated Docker container.
-                          <br />Your backend (pytest) and frontend (Jest) tests will run automatically.
-                        </div>
-                      )}
-                      {testResults && !testRunning && (
-                        <>
-                          {activeTerminalTab === 'full' && (testResults.full_output || 'No output.')}
-                          {activeTerminalTab === 'backend' && (
-                            <>
-                              <div style={{ marginBottom: '8px', fontWeight: 600, color: testResults.backend_tests.status === 'passed' ? '#4caf50' : testResults.backend_tests.status === 'failed' ? '#f44336' : '#ffc107' }}>
-                                Status: {testResults.backend_tests.status.toUpperCase()}
-                              </div>
-                              {testResults.backend_tests.output || 'No backend test output.'}
-                            </>
-                          )}
-                          {activeTerminalTab === 'frontend' && (
-                            <>
-                              <div style={{ marginBottom: '8px', fontWeight: 600, color: testResults.frontend_tests.status === 'passed' ? '#4caf50' : testResults.frontend_tests.status === 'failed' ? '#f44336' : '#ffc107' }}>
-                                Status: {testResults.frontend_tests.status.toUpperCase()}
-                              </div>
-                              {testResults.frontend_tests.output || 'No frontend test output.'}
-                            </>
-                          )}
-                        </>
-                      )}
-                    </div>
                   </div>
-                )}
-
-                {/* Status bar */}
-                <div className="ide-statusbar-v2">
-                  <div>
-                    <span className="status-item">⬡ GroupHub</span>
-                    <span className="status-item">Ln {lineCount}, Col 1</span>
-                  </div>
-                  <div>
-                    <span className="status-item">{selectedFile.language}</span>
-                    <span className="status-item">UTF-8</span>
-                    <span className="status-item">Spaces: 2</span>
-                    {viewMode === 'member' && selectedMember && (
-                      <span className="status-item" style={{ color: 'rgba(255,255,255,0.7)' }}>
-                        Viewing: {selectedMember.username}
-                      </span>
+                </>
+              ) : (
+                /* Welcome screen */
+                <div className="ide-welcome">
+                  <div className="ide-welcome-logo">⬡</div>
+                  <h3>GroupHub Workspace</h3>
+                  <p>{isAdmin
+                    ? 'Select a file from the explorer or create a new one to get started.'
+                    : 'Select a file from the explorer to start working on your copy.'
+                  }</p>
+                  <div className="ide-welcome-shortcuts">
+                    {isAdmin && (
+                      <div className="ide-welcome-shortcut">
+                        <kbd>＋</kbd> <span>New file</span>
+                      </div>
                     )}
-                  </div>
-                </div>
-              </>
-            ) : (
-              /* Welcome screen */
-              <div className="ide-welcome">
-                <div className="ide-welcome-logo">⬡</div>
-                <h3>GroupHub Workspace</h3>
-                <p>{isAdmin
-                  ? 'Select a file from the explorer or create a new one to get started.'
-                  : 'Select a file from the explorer to start working on your copy.'
-                }</p>
-                <div className="ide-welcome-shortcuts">
-                  {isAdmin && (
                     <div className="ide-welcome-shortcut">
-                      <kbd>＋</kbd> <span>New file</span>
+                      <kbd>Ctrl+S</kbd> <span>Save file</span>
                     </div>
+                    <div className="ide-welcome-shortcut">
+                      <kbd>Tab</kbd> <span>Indent</span>
+                    </div>
+                  </div>
+                  {isAdmin && files.length === 0 && (
+                    <button className="btn btn-primary btn-sm" style={{ marginTop: 20 }}
+                      onClick={() => setShowAddFile(true)}>
+                      ＋ Create First File
+                    </button>
                   )}
-                  <div className="ide-welcome-shortcut">
-                    <kbd>Ctrl+S</kbd> <span>Save file</span>
-                  </div>
-                  <div className="ide-welcome-shortcut">
-                    <kbd>Tab</kbd> <span>Indent</span>
-                  </div>
                 </div>
-                {isAdmin && files.length === 0 && (
-                  <button className="btn btn-primary btn-sm" style={{ marginTop: 20 }}
-                    onClick={() => setShowAddFile(true)}>
-                    ＋ Create First File
-                  </button>
-                )}
+              )}
+            </div>
+
+            {/* AI Tutor Chat Panel */}
+            {showTutorChat && (
+              <div style={{ flex: 3, minWidth: 320, borderLeft: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', overflow: 'hidden', height: '100%', minHeight: 0 }}>
+                <TutorChat
+                  groupId={`group_${groupId}`}
+                  candidateName={user?.username || 'Anonymous'}
+                />
               </div>
             )}
-          </div>
+
+          </div>{/* End Editor + Chat Wrapper */}
         </div>
       </div>
 

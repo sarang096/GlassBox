@@ -10,11 +10,14 @@ services:
       - n8n_data:/home/node/.n8n
     environment:
       - TZ=Asia/Kolkata
-      - GEMINI_KEY="Replace with ur GEMINI_KEY"
+      - GEMINI_KEY=AIzaSyBNcFueLZf0Zbv3XsG177SvyqsF4_gjh_A
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
       - N8N_VARIABLES_ENABLED=true
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     restart: always
 
 volumes:
