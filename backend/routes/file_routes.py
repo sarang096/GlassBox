@@ -185,19 +185,38 @@ def create_file(group_id: int, data: FileCreate, current_user: User = Depends(ge
 
 @router.get("", response_model=list[FileResponse])
 def list_files(group_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """List files in group. Hidden files only visible to admin."""
     group, _ = _check_membership(current_user, group_id, db)
+    is_admin = group.admin_id == current_user.id
+    
     query = db.query(GroupFile).filter(GroupFile.group_id == group_id)
-    # Send all files to everyone, front-end will handle the separated display 
     files = query.order_by(GroupFile.created_at).all()
+    
+    # SECURITY: Filter hidden files for non-admins (solutions, tests must be hidden)
+    if not is_admin:
+        files = [f for f in files if not f.is_hidden]
+        logger.info(f"User {current_user.id} listed {len(files)} visible files in group {group_id}")
+    else:
+        logger.info(f"Admin {current_user.id} listed all {len(files)} files (including hidden) in group {group_id}")
+    
     return [FileResponse.model_validate(f) for f in files]
 
 
 @router.get("/{file_id}", response_model=FileResponse)
 def get_file(group_id: int, file_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    _check_membership(current_user, group_id, db)
+    """Get file details. Hidden files only visible to admin."""
+    group, _ = _check_membership(current_user, group_id, db)
+    is_admin = group.admin_id == current_user.id
+    
     gf = db.query(GroupFile).filter(GroupFile.id == file_id, GroupFile.group_id == group_id).first()
     if not gf:
         raise HTTPException(status_code=404, detail="File not found")
+    
+    # SECURITY: Non-admins cannot access hidden files (solutions, tests)
+    if not is_admin and gf.is_hidden:
+        logger.warning(f"User {current_user.id} attempted to access hidden file {file_id}")
+        raise HTTPException(status_code=403, detail="You do not have permission to access this file")
+    
     return FileResponse.model_validate(gf)
 
 
@@ -267,8 +286,18 @@ def delete_file(group_id: int, file_id: int, current_user: User = Depends(get_cu
 
 @router.get("/{file_id}/my-version", response_model=MemberVersionResponse)
 def get_my_version(group_id: int, file_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Member gets their own copy of the file."""
-    _check_membership(current_user, group_id, db)
+    """Member gets their own copy of the file. Hidden files only for admin."""
+    group, _ = _check_membership(current_user, group_id, db)
+    is_admin = group.admin_id == current_user.id
+    
+    gf = db.query(GroupFile).filter(GroupFile.id == file_id, GroupFile.group_id == group_id).first()
+    if not gf:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # SECURITY: Non-admins cannot access hidden files (solutions, tests)
+    if not is_admin and gf.is_hidden:
+        logger.warning(f"User {current_user.id} attempted to access hidden file version {file_id}")
+        raise HTTPException(status_code=403, detail="You do not have permission to access this file")
 
     version = db.query(MemberFileVersion).filter(
         MemberFileVersion.file_id == file_id,
@@ -299,7 +328,21 @@ def get_my_version(group_id: int, file_id: int, current_user: User = Depends(get
 def update_my_version(group_id: int, file_id: int, data: MemberVersionUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Member saves edits to their own copy."""
     try:
-        _check_membership(current_user, group_id, db)
+        group, _ = _check_membership(current_user, group_id, db)
+
+        # Fetch and validate file permissions
+        gf = db.query(GroupFile).filter(GroupFile.id == file_id, GroupFile.group_id == group_id).first()
+        if not gf:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # SECURITY: Members cannot edit hidden files (solutions, tests) or readonly files
+        if gf.is_hidden:
+            logger.warning(f"User {current_user.id} attempted to edit hidden file {file_id}")
+            raise HTTPException(status_code=403, detail="Cannot edit hidden files")
+        
+        if gf.is_readonly:
+            logger.warning(f"User {current_user.id} attempted to edit readonly file {file_id}")
+            raise HTTPException(status_code=403, detail="This file is read-only")
 
         # Validate content size (max 10MB)
         content = data.content or ""
@@ -312,9 +355,6 @@ def update_my_version(group_id: int, file_id: int, data: MemberVersionUpdate, cu
         ).first()
 
         if not version:
-            gf = db.query(GroupFile).filter(GroupFile.id == file_id, GroupFile.group_id == group_id).first()
-            if not gf:
-                raise HTTPException(status_code=404, detail="File not found")
             version = MemberFileVersion(file_id=gf.id, user_id=current_user.id, content=content)
             db.add(version)
         else:

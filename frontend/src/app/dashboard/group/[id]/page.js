@@ -1201,6 +1201,32 @@ export default function GroupDetailPage({ params }) {
                       flexDirection: 'column',
                       flexShrink: 0,
                     }}>
+                      {/* Test Results Summary */}
+                      {testResults && (
+                        <div style={{
+                          background: '#161b22',
+                          padding: '10px 12px',
+                          borderBottom: '1px solid rgba(255,255,255,0.08)',
+                          fontSize: '0.8rem',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          flexShrink: 0,
+                        }}>
+                          <div style={{ display: 'flex', gap: '16px' }}>
+                            <span>
+                              {testResults?.backend_tests?.status === 'passed' ? '✅' : testResults?.backend_tests?.status === 'failed' ? '❌' : '⚙️'} Backend {testResults?.backend_tests?.status}
+                            </span>
+                            <span>
+                              {testResults?.frontend_tests?.status === 'passed' ? '✅' : testResults?.frontend_tests?.status === 'failed' ? '❌' : '📜'} Frontend {testResults?.frontend_tests?.status}
+                            </span>
+                          </div>
+                          <span style={{ color: '#8b949e', fontSize: '0.75rem' }}>
+                            ⏱ {testResults.duration}s
+                          </span>
+                        </div>
+                      )}
+                      
                       {/* Terminal tabs */}
                       <div style={{
                         display: 'flex', alignItems: 'center', gap: '0',
@@ -1234,11 +1260,6 @@ export default function GroupDetailPage({ params }) {
                             )}
                           </button>
                         ))}
-                        {testResults && (
-                          <span style={{ marginLeft: 'auto', fontSize: '0.7rem', color: '#8b949e', paddingRight: '8px' }}>
-                            ⏱ {testResults.duration}s
-                          </span>
-                        )}
                       </div>
 
                       {/* Terminal content */}

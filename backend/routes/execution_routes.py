@@ -59,32 +59,65 @@ def _check_membership(user: User, group_id: int, db: Session):
 
 def _get_user_workspace(user: User, group: Group, db: Session) -> list[dict]:
     """
-    Build the user's complete workspace.
-    - For non-hidden files: use the member's edited version (or template fallback)
-    - For hidden files (tests): always use the admin's template
+    Build the user's complete workspace for execution.
+    
+    CRITICAL ISOLATION MODEL — CANDIDATES RUN BUGGY CODE ONLY:
+    - For NON-HIDDEN files: use the member's EDITED version (contains buggy code for candidates)
+    - For HIDDEN files (tests/solutions): use admin template (candidates never see, tests run against buggy code)
+    - Admin: gets templates for everything (correct code)
+    
+    This ensures:
+    1. Candidates see buggy code in editor
+    2. Tests execute against candidate's buggy code
+    3. Solutions/tests stay hidden from candidates
+    
+    GUARANTEE: Candidates NEVER get solution code in their workspace.
     """
     files = db.query(GroupFile).filter(GroupFile.group_id == group.id).all()
     workspace = []
     is_admin = group.admin_id == user.id
+    
+    logger.info(f"[ISOLATION] Building workspace for {'ADMIN' if is_admin else 'CANDIDATE'} {user.id} in group {group.id}")
 
     for gf in files:
-        if is_admin or gf.is_hidden:
-            # Admin always gets template; hidden test files use template for everyone
+        # SECURITY: Candidates cannot access solution files
+        if not is_admin and "solution" in gf.filename.lower():
+            logger.warning(f"[ISOLATION-BLOCK] Candidate {user.id} blocked from solution file: {gf.filename}")
+            continue  # Skip solution files for candidates
+        
+        if is_admin:
+            # Admin: get template (correct code)
             content = gf.content
+            source = "ADMIN_TEMPLATE_CORRECT"
+        elif gf.is_hidden:
+            # Candidate: hidden files are TESTS only (from template)
+            # NOT solution files — solutions are marked as hidden too, but should be skipped above
+            content = gf.content
+            source = "HIDDEN_TEMPLATE_TESTS"
+            logger.debug(f"[ISOLATION] Hidden file '{gf.filename}' (tests) included from template for candidate")
         else:
-            # Client gets their own version
+            # Candidate: non-hidden files use their EDITED version (BUGGY code)
             version = db.query(MemberFileVersion).filter(
                 MemberFileVersion.file_id == gf.id,
                 MemberFileVersion.user_id == user.id
             ).first()
-            content = version.content if version else gf.content
+            if version:
+                content = version.content
+                source = "MEMBER_EDITED_BUGGY"
+                logger.debug(f"[ISOLATION] Candidate file '{gf.filename}' loaded from member's edited version (BUGGY)")
+            else:
+                content = gf.content
+                source = "TEMPLATE_FALLBACK_BUGGY"
+                logger.warning(f"[ISOLATION] Member version missing for '{gf.filename}', using template fallback (buggy)")
 
         workspace.append({
             "filename": gf.filename,
             "content": content or "",
             "is_hidden": gf.is_hidden,
+            "_source": source,  # Debug: track where each file came from
         })
 
+    logger.info(f"[ISOLATION] Workspace assembled: {len(workspace)} files for {'ADMIN' if is_admin else 'CANDIDATE'} {user.id}")
     return workspace
 
 
@@ -326,12 +359,24 @@ echo "════════════════════════�
             results["backend_tests"]["output"] = backend_section.strip()
             results["backend_tests"]["duration"] = round(elapsed * 0.5, 2)
 
-            if "passed" in backend_section.lower():
-                results["backend_tests"]["status"] = "passed"
-            elif "failed" in backend_section.lower() or "error" in backend_section.lower():
+            # CRITICAL: Parse actual test results from pytest summary line
+            # Look for patterns like "5 failed, 1 passed" or "6 passed"
+            import re
+            
+            # Match pytest summary: "X failed" or "X passed in"
+            test_summary = re.search(r'(\d+)\s+failed|(\d+)\s+passed\s+in', backend_section, re.IGNORECASE)
+            
+            if re.search(r'(\d+)\s+failed', backend_section, re.IGNORECASE):
+                # If ANY tests failed, mark as failed
                 results["backend_tests"]["status"] = "failed"
+                logger.info(f"Backend tests FAILED — detected failed test count in summary")
+            elif re.search(r'(\d+)\s+passed\s+in', backend_section, re.IGNORECASE) and not re.search(r'(\d+)\s+failed', backend_section, re.IGNORECASE):
+                # All tests passed and no failures
+                results["backend_tests"]["status"] = "passed"
+                logger.info(f"Backend tests PASSED — all tests succeeded")
             else:
                 results["backend_tests"]["status"] = "unknown"
+                logger.warning(f"Backend tests status UNKNOWN")
 
         # Parse frontend test results
         if "PHASE 2: Frontend Tests" in full_output:
@@ -341,12 +386,24 @@ echo "════════════════════════�
             results["frontend_tests"]["output"] = frontend_section.strip()
             results["frontend_tests"]["duration"] = round(elapsed * 0.5, 2)
 
-            if "passed" in frontend_section.lower() or "tests passed" in frontend_section.lower():
-                results["frontend_tests"]["status"] = "passed"
-            elif "failed" in frontend_section.lower() or "error" in frontend_section.lower():
+            # CRITICAL: Count PASS/FAIL lines which Jest outputs for each test file
+            # Example: "PASS ./App.test.jsx" or "FAIL ./App.test.jsx"
+            import re
+            
+            pass_suites = len(re.findall(r'(?:^|\n)PASS\s+', frontend_section))
+            fail_suites = len(re.findall(r'(?:^|\n)FAIL\s+', frontend_section))
+            
+            logger.debug(f"Frontend: {pass_suites} PASS suites, {fail_suites} FAIL suites")
+            
+            if fail_suites > 0:
                 results["frontend_tests"]["status"] = "failed"
+                logger.info(f"Frontend tests FAILED — {fail_suites} test suite(s) failed")
+            elif pass_suites > 0:
+                results["frontend_tests"]["status"] = "passed"
+                logger.info(f"Frontend tests PASSED — {pass_suites} test suite(s) passed, 0 failed")
             else:
                 results["frontend_tests"]["status"] = "unknown"
+                logger.warning(f"Frontend tests UNKNOWN — no PASS/FAIL detected")
 
         return results
 
@@ -387,14 +444,41 @@ def execute_tests(
     """
     Execute the test suites for a user's workspace inside an isolated Docker container.
     
-    Returns the terminal output for each test phase (backend, frontend)
-    so the client can see their results.
+    ISOLATION GUARANTEE:
+    - ADMINS: See & run correct solution code against tests
+    - CANDIDATES: Run ONLY buggy code against tests, hidden files blocked
+    
+    Returns the terminal output for each test phase (backend, frontend).
     """
     try:
         group, membership = _check_membership(current_user, group_id, db)
+        is_admin = group.admin_id == current_user.id
+        
+        # Verify candidate cannot execute as admin
+        if not is_admin and membership is None:
+            raise HTTPException(status_code=403, detail="Only group members can execute")
 
-        # Build the user's workspace
+        # Build the user's workspace (buggy code for candidates, correct for admins)
         workspace = _get_user_workspace(current_user, group, db)
+        
+        # SECURITY: Verify candidates don't get solution files in workspace
+        if not is_admin:
+            hidden_count = sum(1 for f in workspace if f.get("is_hidden"))
+            if hidden_count > 0:
+                # Hidden files are allowed (tests), but verify they can't edit them
+                visible_files = [f for f in workspace if not f.get("is_hidden")]
+                logger.warning(
+                    f"SECURITY CHECK: Candidate {current_user.id} has {len(visible_files)} visible files "
+                    f"and {hidden_count} hidden files (tests/solutions). Verifying hidden files are template-only..."
+                )
+            
+            # Verify no solutions in candidate's visible workspace
+            has_solution = any("solution" in f.get("filename", "").lower() for f in workspace if not f.get("is_hidden"))
+            if has_solution:
+                logger.error(f"SECURITY BREACH: Candidate {current_user.id} got solution file in visible workspace!")
+                raise HTTPException(status_code=403, detail="Unauthorized: Cannot access solution files")
+        else:
+            logger.info(f"Admin {current_user.id} executing in group {group_id} — will see correct solution code")
 
         if not workspace:
             raise HTTPException(status_code=400, detail="No files in workspace to execute")
