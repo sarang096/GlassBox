@@ -9,7 +9,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a database schema generator. Generate a ' + $json.db_style + ' database file for this app.\\n\\nApp: ' + $json.description + '\\n\\nReply using EXACTLY this format with these exact delimiters and nothing else before or after:\\n\\n<<<FILENAME>>>\\ndata.' + $json.db_style + '\\n<<<SCHEMA_SUMMARY>>>\\none sentence describing the columns\\n<<<CODE>>>\\nid,col1,col2,col3\\n1,val,val,val\\n2,val,val,val\\n3,val,val,val\\n<<<END>>>\\n\\nRules:\\n- id is the first column\\n- 4-6 meaningful columns for this app\\n- 3 realistic sample rows\\n- Plain CSV, no quotes unless value contains a comma' }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 600 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }] }) }}",
         "options": {
-          "timeout": 60000
+          "timeout": 120000
         }
       },
       "id": "aa0f4dbd-b530-40ca-8c35-ece95b7c4b1c",
@@ -29,7 +29,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a backend developer. Write a complete ' + $json.backend_language + ' REST API.\\n\\nApp: ' + $json.description + '\\nDB file: ' + $json.db.fileName + '\\nSchema: ' + $json.db.schema_summary + '\\nCSV sample:\\n' + $json.db.code + '\\n\\nReply using EXACTLY this format:\\n\\n<<<FILENAME>>>\\n' + ($json.backend_language == 'python' ? 'app.py' : $json.backend_language == 'java' ? 'Main.java' : 'main.c') + '\\n<<<ENDPOINTS>>>\\nGET /api/items\\nPOST /api/items\\nGET /api/items/<id>\\nPUT /api/items/<id>\\nDELETE /api/items/<id>\\n<<<CODE>>>\\n# full Flask app code here\\n<<<END>>>\\n\\nCRITICAL Flask 3.x rules (violating any of these will break the app):\\n- Use Flask 3.x — NEVER use @app.before_first_request (it was removed in Flask 2.3)\\n- Initialize data at module level, OUTSIDE any function, exactly like this:\\n    DATA_STORE = []\\n    def _load():\\n        # ... read csv ...\\n    _load()\\n- When updating or deleting, MUTATE the list in-place (e.g. DATA_STORE[:] = [x for x in DATA_STORE if x[\\'id\\'] != id]).\\n- NEVER reassign the global variable (no DATA_STORE = ...), as it breaks testing references.\\n- Full CRUD using csv module on \\'' + $json.db.fileName + '\\', always sync with DATA_STORE\\n- JSON responses with jsonify(), correct HTTP status codes (200, 201, 404)\\n- app.run(host=\\'0.0.0.0\\', port=5000, debug=False) at the bottom inside if __name__ == \\'__main__\\'\\n- Imports: flask, flask_cors, csv, json, os, uuid only\\n- Enable CORS: from flask_cors import CORS; CORS(app)\\n- Keep in-memory list as source of truth, write-through to CSV on changes\\n- Write complete, real working code — no pseudocode, no placeholders\\n- NO @app.before_first_request, NO @app.before_request for init\\n- This code MUST be 100% correct and pass all tests — do NOT introduce any bugs' }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 3000 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }] }) }}",
         "options": {
-          "timeout": 60000
+          "timeout": 120000
         }
       },
       "id": "672808f3-3848-4e1b-939a-ba3ebec32a48",
@@ -49,7 +49,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a senior code reviewer. Review and fix the ' + $json.backend_language + ' code below.\\n\\nRules to enforce:\\n1. NEVER use @app.before_first_request â€” it was removed in Flask 2.3. Replace with module-level initialization.\\n2. Data must be loaded at module level (outside functions), like:\\n   items = []\\n   def _load_data():\\n       # read csv here\\n   _load_data()\\n3. All routes must return jsonify() responses\\n4. app.run() must be inside if __name__ == \\'__main__\\':\\n5. CORS must be enabled with flask_cors\\n6. No syntax errors, no undefined variables\\n\\nOriginal code:\\n```python\\n' + ($json.backend_solution?.code || $json.backend.code) + '\\n```\\n\\nReply using EXACTLY this format:\\n\\n<<<FIXED_CODE>>>\\n# corrected full Flask app code here â€” do NOT add explanations, just the code\\n<<<END>>>' }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 3500 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }] }) }}",
         "options": {
-          "timeout": 60000
+          "timeout": 120000
         }
       },
       "id": "1a3e5e92-4d11-48d7-88f0-48a859a5ca4b",
@@ -69,7 +69,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a senior software engineer creating debugging challenges for students.\\n\\nTake the correct code below and inject EXACTLY 3-4 DIFFERENT bugs that break CORE functionality. The goal is that when unit tests run against this buggy code, at least 70% of tests FAIL.\\n\\nSTRICT RULES:\\n- Code must run without syntax errors (no SyntaxError, no ImportError)\\n- Do NOT add comments mentioning bugs\\n- Do NOT remove functions or routes entirely\\n- Each bug must affect a DIFFERENT route/endpoint\\n- Bugs must cause test FAILURES (wrong return values, wrong status codes, missing data, broken logic)\\n\\nVARIATION SEED: ' + $json.bug_seed + '\\nYou MUST pick 3-4 bugs from DIFFERENT categories below (seed%4=' + ($json.bug_seed % 4) + '):\\n\\nCATEGORY A - WRONG STATUS CODES: Return 200 instead of 201 on POST create. Return 200 instead of 404 when item not found. Return 204 instead of 200 on GET.\\nCATEGORY B - BROKEN CRUD LOGIC: In PUT/update, do not actually update the item fields (ignore the request body). In DELETE, remove from CSV but not from DATA_STORE (or vice versa). In POST, do not append the new item to DATA_STORE.\\nCATEGORY C - WRONG RESPONSE DATA: Return wrong JSON key names (e.g. wrong-key instead of the actual field name). Return the entire list instead of a single item on GET by ID. Return empty dict {} instead of the created item on POST.\\nCATEGORY D - DATA CORRUPTION: Use DATA_STORE = [...] instead of DATA_STORE[:] = [...] (breaks reference). Use wrong ID comparison (string vs int mismatch). Overwrite all items instead of updating one.\\n\\nIMPORTANT: The bugs must affect the GET, POST, PUT, and DELETE operations so that MOST tests fail, not just one or two.\\n\\nReturn ONLY the full buggy ' + $json.backend_language + ' code. No markdown fences, no explanations, no comments about bugs.\\n\\nCode:\\n' + $json.backend_fixed + '\\n' }] }], generationConfig: { temperature: 0.8, maxOutputTokens: 3500 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }]}) }}",
         "options": {
-          "timeout": 60000
+          "timeout": 120000
         }
       },
       "id": "5dd93958-5dad-4bcc-86b7-5790ac711d1c",
@@ -102,7 +102,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a frontend developer. Write a complete ' + $json.frontend_language + ' component.\\n\\nApp: ' + $json.description + '\\nBackend: http://localhost:5000\\nEndpoints:\\n' + $json.backend.endpoints.join('\\n') + '\\n\\nReply using EXACTLY this format:\\n\\n<<<FILENAME>>>\\n' + ($json.frontend_language == 'nextjs' ? 'page.js' : 'App.jsx') + '\\n<<<CODE>>>\\n// full React component here\\n<<<END>>>\\n\\nCode rules:\\n- Use standard ' + $json.frontend_language + ' paradigms (e.g. hooks for React, App router for Next.js)\\n- fetch() to call the endpoints above\\n- Full UI: list records, add form, delete button\\n- data-testid=\\'item-list\\' on list container, \\'item-row\\' on each row, \\'add-form\\' on form, \\'name-input\\' on main input, \\'submit-btn\\' on submit, \\'delete-btn\\' on delete\\n- Tailwind utility classes for styling\\n- Single default export, no external libs beyond React\\n- After POST to create item, update state with new item or re-fetch list\\n- Fill in form input with user text before POST\\n- Clear input field after successful submission\\n- Write CORRECT, working code - NO bugs, NO broken handlers' }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 3000 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }] }) }}",
         "options": {
-          "timeout": 60000
+          "timeout": 120000
         }
       },
       "id": "f99e6a2d-e8fb-41c7-a1e6-184c96d0c8e6",
@@ -122,7 +122,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a code mutation specialist creating debugging challenges for students.\\n\\nTake this CORRECT ' + $json.frontend_language + ' component and inject EXACTLY 3-4 DIFFERENT bugs that break CORE functionality. The goal is that when Jest tests run against this buggy code, at least 70% of tests FAIL.\\n\\nVARIATION SEED: ' + $json.bug_seed + '\\nYou MUST pick 3-4 bugs from DIFFERENT categories below (seed%4=' + (($json.bug_seed + 1) % 4) + '):\\n\\nCATEGORY A - BROKEN FETCH CALLS: Use wrong endpoint URL (e.g. /api/item instead of /api/items). Use wrong HTTP method (GET instead of POST for creating). Missing Content-Type header on POST/PUT requests. Forget to call response.json().\\nCATEGORY B - BROKEN STATE MANAGEMENT: Do not update state after successful POST (list does not refresh). Set items to empty array instead of the fetched data. Use setItems(data) where data is the raw Response object instead of parsed JSON.\\nCATEGORY C - BROKEN EVENT HANDLERS: Remove event.preventDefault() from form submit (causes page reload). Pass wrong ID to delete handler (e.g. always delete first item, or pass index instead of id). Form submit handler does not actually call fetch.\\nCATEGORY D - BROKEN RENDERING: Use wrong data-testid values (e.g. items-list instead of item-list). Do not render the list of items at all (return empty div). Show wrong field from each item in the list.\\n\\nIMPORTANT:\\n- Code must NOT have syntax errors\\n- Bugs must affect rendering, fetching, adding, AND deleting so that MOST tests fail\\n- Do NOT add comments mentioning bugs\\n- Return ONLY the full buggy code, no markdown fences, no explanations\\n\\nCORRECT CODE:\\n' + $json.frontend_solution.code + '\\n' }] }], generationConfig: { temperature: 0.8, maxOutputTokens: 3500 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }]}) }}",
         "options": {
-          "timeout": 60000
+          "timeout": 120000
         }
       },
       "id": "fc2437bd-a593-4fb0-8278-5255ad8659c5",
@@ -155,7 +155,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a QA engineer. Write backend API tests for the provided ' + $json.backend_language + ' code.\\n\\nHere is the EXACT CORRECT backend code you must write tests for:\\n```\\n' + $json.backend_solution.code + '\\n```\\n\\nApp: ' + $json.description + '\\nEndpoints:\\n' + $json.backend.endpoints.join('\\n') + '\\n\\nReply using EXACTLY this format:\\n\\n<<<FILENAME>>>\\n' + ($json.backend_language === 'python' ? 'test_backend.py' : $json.backend_language === 'java' ? 'TestBackend.java' : 'test_backend.c') + '\\n<<<CODE>>>\\n// test code here\\n<<<END>>>\\n\\nStrict rules:\\n' + ($json.backend_language === 'python' ? '- import unittest\\n- import app as my_app\\n- class must extend unittest.TestCase\\n- setUp: self.client = my_app.app.test_client(); my_app.DATA_STORE.clear()\\n- tearDown: my_app.DATA_STORE.clear()\\n- Use self.client.get/post/put/delete with json= param\\n- Use response.get_json(), response.status_code' : '- Write standard assertion files that make HTTP requests to localhost:5000\\n- Do NOT import the application directly' ) + '\\n- test_get_items, test_create_item, test_delete_item' }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 3500 }, safetySettings: [] }) }}",
         "options": {
-          "timeout": 60000
+          "timeout": 120000
         }
       },
       "id": "4f165f58-d4ce-4fc6-b9e3-5024e5dcc876",
@@ -175,7 +175,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are a frontend QA engineer. Write component tests for the provided ' + $json.frontend_language + ' code using Jest.\\n\\nHere is the EXACT CORRECT frontend component code you must write tests for:\\n```jsx\\n' + $json.frontend_solution.code + '\\n```\\n\\nApp: ' + $json.description + '\\nBackend endpoints: ' + $json.backend.endpoints.join(', ') + '\\n\\nReply using EXACTLY this format:\\n\\n<<<FILENAME>>>\\n' + ($json.frontend_language == 'nextjs' ? 'page.test.js' : 'App.test.jsx') + '\\n<<<CODE>>>\\n// full test file here\\n<<<END>>>\\n\\nStrict rules:\\n- Read the frontend code above carefully - use the EXACT data-testid attributes, prop names, and state field names you see there\\n- import React from \\'react\\'\\n- import { render, screen, fireEvent, waitFor } from \\'@testing-library/react\\'\\n- import App from \\'./App\\'\\n- Mock ALL fetch() calls with jest.fn() - return realistic mock data matching the app data shape\\n- global.fetch = jest.fn() in beforeAll or beforeEach\\n- test_renders, test_shows_items, test_add_item, test_delete_item\\n- beforeEach: jest.clearAllMocks()\\n- NO real network calls\\n- These tests must pass when run against the CORRECT App.jsx frontend_solution above' }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 2500 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }]}) }}",
         "options": {
-          "timeout": 60000
+          "timeout": 120000
         }
       },
       "id": "4e182789-a659-478b-98fa-43f3ec84dc19",
@@ -195,7 +195,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'You are an E2E QA engineer. Write Cypress end-to-end tests.\\n\\nApp: ' + $json.description + '\\nFrontend: http://localhost:3000\\nBackend: http://localhost:5000\\nEndpoints:\\n' + $json.backend.endpoints.join('\\n') + '\\n\\ndata-testid attributes: item-list, item-row, add-form, name-input, submit-btn, delete-btn\\n\\nReply using EXACTLY this format:\\n\\n<<<FILENAME>>>\\ncypress/e2e/app.cy.js\\n<<<CODE>>>\\n// full Cypress test file here\\n<<<END>>>\\n\\nStrict rules:\\n- describe block named after the app\\n- beforeEach: cy.visit(\\'http://localhost:3000\\')\\n- test_page_loads, test_shows_existing_items, test_add_item, test_delete_item\\n- Use cy.intercept() for API stubs with aliases\\n- Use cy.get(\\'[data-testid=...]\\') selectors\\n- NO hardcoded waits â€” use cy.wait(\\'@alias\\')' }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 2500 }, safetySettings: [{ category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' }, { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }] }) }}",
         "options": {
-          "timeout": 60000
+          "timeout": 120000
         }
       },
       "id": "5fc697d2-5d5e-4129-9cfa-e231c82374fd",
@@ -362,7 +362,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ files: $json.files }) }}",
         "options": {
-          "timeout": 30000
+          "timeout": 120000
         }
       },
       "id": "1080f63d-a232-462f-9e1b-1aea32e958c2",
@@ -442,7 +442,7 @@
     },
     {
       "parameters": {
-        "jsCode": "return [{ json: {\n  has_backend: !!$json.backend,\n  has_solution: !!$json.backend_solution,\n  backend_len: $json.backend?.code?.length,\n  solution_len: $json.backend_solution?.code?.length\n} }];"
+        "jsCode": "// Pass ALL context through — only add debug fields as _debug sub-object\nreturn [{ json: {\n  ...$json,\n  _debug: {\n    has_backend: !!$json.backend,\n    has_solution: !!$json.backend_solution,\n    backend_len: $json.backend?.code?.length,\n    solution_len: $json.backend_solution?.code?.length\n  }\n} }];"
       },
       "id": "d1b2c3d4-e5f6-7890-abcd-ef1234567890",
       "name": "Debug Backend State",
