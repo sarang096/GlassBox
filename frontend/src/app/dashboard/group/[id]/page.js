@@ -173,7 +173,7 @@ function detectLanguage(filename) {
 }
 
 // ─── AiModeModal ───
-function AiModeModal({ onClose, onFilesGenerated, groupId }) {
+function AiModeModal({ onClose, onFilesGenerated, groupId, groupCode }) {
   const [description, setDescription] = useState('');
   const [frontendLang, setFrontendLang] = useState('react');
   const [backendLang, setBackendLang] = useState('python');
@@ -195,6 +195,7 @@ function AiModeModal({ onClose, onFilesGenerated, groupId }) {
     try {
       const payload = {
         group_id: groupId,
+        group_code: groupCode,
         description: description.trim(),
         frontend_language: frontendLang,
         backend_language: backendLang,
@@ -573,10 +574,10 @@ export default function GroupDetailPage({ params }) {
     setMemberVersion(null);
     setEditorContent('');
 
-    // Fetch scores from n8n through our API proxy
+    // Fetch scores from n8n through our API proxy — use group_code as the stable unique key
     if (!clientScores[member.id]) {
       try {
-        const res = await fetch(`/api/scores?group_id=group_${groupId}&candidate_name=${encodeURIComponent(member.username)}`);
+        const res = await fetch(`/api/scores?group_id=${encodeURIComponent(group.group_code)}&candidate_name=${encodeURIComponent(member.username)}`);
         const data = await res.json();
         setClientScores(prev => ({ ...prev, [member.id]: data }));
       } catch (err) {
@@ -1376,7 +1377,7 @@ export default function GroupDetailPage({ params }) {
             {showTutorChat && (
               <div style={{ flex: 3, minWidth: 320, borderLeft: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', overflow: 'hidden', height: '100%', minHeight: 0 }}>
                 <TutorChat
-                  groupId={`group_${groupId}`}
+                  groupId={group.group_code}
                   candidateName={user?.username || 'Anonymous'}
                 />
               </div>
@@ -1395,6 +1396,7 @@ export default function GroupDetailPage({ params }) {
       {showAiMode && (
         <AiModeModal
           groupId={groupId}
+          groupCode={group.group_code}
           onClose={() => setShowAiMode(false)}
           onFilesGenerated={(createdFiles) => {
             setFiles(prev => [...prev, ...createdFiles]);

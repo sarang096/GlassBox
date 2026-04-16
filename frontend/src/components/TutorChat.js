@@ -30,12 +30,37 @@ export default function TutorChat({ groupId, candidateName }) {
   
   const [input, setInput] = useState("");
 
+  // On mount: check if the server session was reset (turn_count === 0).
+  // If so, wipe stale localStorage so the UI matches the backend.
+  useEffect(() => {
+    async function syncWithServer() {
+      try {
+        const res = await fetch(
+          `/api/scores?group_id=${encodeURIComponent(groupId)}&candidate_name=${encodeURIComponent(candidateName)}`
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        // Server has no turns (new challenge) but localStorage has old messages → clear it
+        if (!data.found || data.turn_count === 0) {
+          localStorage.removeItem(storageKey);
+          setMessages(INITIAL_MESSAGES);
+        }
+      } catch (e) {
+        // Silently ignore — don't block the chat on a failed sync
+        console.warn("[TutorChat] Could not sync session state:", e);
+      }
+    }
+    syncWithServer();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupId, candidateName]);
+
   // Persist to localStorage whenever messages change
   useEffect(() => {
     if (typeof window !== "undefined") {
       localStorage.setItem(storageKey, JSON.stringify(messages));
     }
   }, [messages, storageKey]);
+
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);

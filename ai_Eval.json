@@ -3,92 +3,6 @@
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "init-session",
-        "responseMode": "responseNode",
-        "options": {}
-      },
-      "id": "b398fbef-fdbe-4ae3-9594-d872009b0fd6",
-      "name": "Webhook: Init Session",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
-      "position": [
-        10000,
-        2496
-      ],
-      "webhookId": "init-session"
-    },
-    {
-      "parameters": {
-        "jsCode": "const body = $input.first().json.body || $input.first().json;\nconst { group_id, codebase } = body;\nif (!group_id || !codebase) throw new Error('group_id and codebase are required');\nreturn [{ json: { group_id: String(group_id).trim(), codebase: String(codebase).trim(), created_at: new Date().toISOString() } }];"
-      },
-      "id": "c38c1531-8249-4e05-9a7a-6ff451ad3072",
-      "name": "Validate Init Input",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        10224,
-        2496
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://lnnupwiqtieirbctamvu.supabase.co/rest/v1/codebases",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "supabaseApi",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Prefer",
-              "value": "resolution=merge-duplicates"
-            },
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ group_id: $json.group_id, codebase: $json.codebase, created_at: $json.created_at }) }}",
-        "options": {}
-      },
-      "id": "5a7b03d9-bcb8-4641-8fb0-87d1499e4a1f",
-      "name": "Upsert Codebase",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        10448,
-        2496
-      ],
-      "credentials": {
-        "supabaseApi": {
-          "id": "MF5E7sCv6njsUwGK",
-          "name": "Supabase account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ ok: true, group_id: $('Validate Init Input').first().json.group_id }) }}",
-        "options": {
-          "responseCode": 200
-        }
-      },
-      "id": "9c52e5ea-1eed-4273-96c1-e717745b745f",
-      "name": "Respond: Init OK",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1,
-      "position": [
-        10672,
-        2496
-      ]
-    },
-    {
-      "parameters": {
-        "httpMethod": "POST",
         "path": "chat",
         "responseMode": "responseNode",
         "options": {}
@@ -561,39 +475,6 @@
     }
   ],
   "connections": {
-    "Webhook: Init Session": {
-      "main": [
-        [
-          {
-            "node": "Validate Init Input",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Validate Init Input": {
-      "main": [
-        [
-          {
-            "node": "Upsert Codebase",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Upsert Codebase": {
-      "main": [
-        [
-          {
-            "node": "Respond: Init OK",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Webhook: Chat": {
       "main": [
         [
@@ -743,6 +624,17 @@
         ]
       ]
     },
+    "Wait: Eval Deferred": {
+      "main": [
+        [
+          {
+            "node": "Compute EMA Scores",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Compute EMA Scores": {
       "main": [
         [
@@ -792,17 +684,6 @@
         [
           {
             "node": "Respond: Scores",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Wait: Eval Deferred": {
-      "main": [
-        [
-          {
-            "node": "Compute EMA Scores",
             "type": "main",
             "index": 0
           }
