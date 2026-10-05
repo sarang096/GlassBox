@@ -1,7 +1,9 @@
 // ═══════════════════════════════════════════
 // API Proxy: POST /api/chat
-// Forwards { group_id, candidate_name, message }
-// to the n8n webhook and returns { reply }
+// Forwards { group_id, candidate_name, message } to the n8n webhook,
+// which is the single canonical AI tutor, and returns { reply, sources, flagged }.
+// group_id MUST be the group_code: n8n derives its score key from it as
+// `{group_id}_{candidate_name}`, and /api/scores reads back with group_code.
 // ═══════════════════════════════════════════
 
 import { NextResponse } from "next/server";
@@ -73,6 +75,9 @@ export async function POST(request) {
 
     return NextResponse.json({
       reply: data.reply || "I couldn't form a response. Could you rephrase?",
+      // Filenames only — n8n never returns reference-solution text.
+      sources: Array.isArray(data.sources) ? data.sources : [],
+      flagged: data.flagged === true,
     });
 
   } catch (error) {

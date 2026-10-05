@@ -10,7 +10,13 @@ services:
       - n8n_data:/home/node/.n8n
     environment:
       - TZ=Asia/Kolkata
-      - GEMINI_KEY=AIzaSyBNcFueLZf0Zbv3XsG177SvyqsF4_gjh_A
+      # Secrets come from the gitignored root .env — never inline them here.
+      - GEMINI_KEY=${GEMINI_KEY}
+      # The tutor's RAG node calls FastAPI. `localhost` inside this container
+      # is the container itself, so it must be addressed on the host gateway.
+      - FASTAPI_URL=http://host.docker.internal:8000
+      # Must match backend/.env ADMIN_SECRET or /api/rag/retrieve returns 401.
+      - ADMIN_SECRET=${ADMIN_SECRET}
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
       - N8N_VARIABLES_ENABLED=true
     extra_hosts:

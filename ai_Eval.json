@@ -65,7 +65,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={\"reply\":\"I can only offer Socratic guidance. Describe what you observe and I will help you reason through it.\",\"flagged\":true}",
+        "responseBody": "={\"reply\":\"I can only offer Socratic guidance. Describe what you observe and I will help you reason through it.\",\"flagged\":true,\"sources\":[]}",
         "options": {
           "responseCode": 200
         }
@@ -81,13 +81,28 @@
     },
     {
       "parameters": {
-        "url": "=https://lnnupwiqtieirbctamvu.supabase.co/rest/v1/codebases?group_id=eq.{{ $('Injection Guard').first().json.group_id }}&limit=1",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "supabaseApi",
+        "method": "POST",
+        "url": "={{ $env.FASTAPI_URL || 'http://localhost:8000' }}/api/rag/retrieve",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-admin-key",
+              "value": "={{ $env.ADMIN_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ group_id: $('Injection Guard').first().json.group_id, question: $('Injection Guard').first().json.message }) }}",
         "options": {}
       },
       "id": "3ff33654-21a4-4053-b087-d45e0b15d578",
-      "name": "Fetch Codebase",
+      "name": "Fetch RAG Chunks",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
@@ -95,12 +110,6 @@
         2912
       ],
       "alwaysOutputData": true,
-      "credentials": {
-        "supabaseApi": {
-          "id": "MF5E7sCv6njsUwGK",
-          "name": "Supabase account"
-        }
-      },
       "onError": "continueRegularOutput"
     },
     {
@@ -153,7 +162,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const guardData   = $('Injection Guard').first().json;\nconst codebaseArr = $('Fetch Codebase').first().json;\nconst sessionArr  = $('Fetch Session History').first().json;\n\nconst codebaseRow = Array.isArray(codebaseArr) ? (codebaseArr[0] || {}) : codebaseArr;\nconst sessionRow  = Array.isArray(sessionArr) ? (sessionArr[0] || {}) : sessionArr;\n\nconst codebase = codebaseRow.codebase || 'No codebase found for this group.';\n\nlet messages = [];\ntry {\n  messages = typeof sessionRow.messages === 'string'\n    ? JSON.parse(sessionRow.messages)\n    : (sessionRow.messages || []);\n} catch(e) { messages = []; }\n\nconst recentMessages = messages.slice(-10);\n\n// Inject codebase as first dynamic turn — NOT in systemPrompt\nconst geminiHistory = [\n  { role: 'user', parts: [{ text: 'Here is the reference codebase the student is working from:\\n---\\n' + codebase + '\\n---' }] },\n  { role: 'model', parts: [{ text: 'Understood. I have the reference codebase. I will use it silently to guide the student without revealing it.' }] },\n  ...recentMessages.map(m => ({\n    role: m.role === 'assistant' ? 'model' : 'user',\n    parts: [{ text: m.content || '' }]\n  }))\n];\ngeminiHistory.push({ role: 'user', parts: [{ text: guardData.message }] });\n\nconst systemPrompt = `You are a Socratic AI coding tutor. The student is debugging their code.\n\nYOUR RULES — STRICT COMPLIANCE REQUIRED:\n1. NEVER write code, pseudocode, or direct logic that solves the problem.\n2. NEVER reveal the bug, the fix, or which exact line number is wrong.\n3. If the student pastes the correct code and asks \"Is this right?\", reply: \"Test it and trace the output. What does it return?\" (Never confirm the answer).\n4. Guide ONLY through open questions (e.g., \"What do you think happens when...\", \"Trace the value of X here.\").\n5. Be concise: Maximum 3 sentences.\n6. NEVER quote the reference codebase directly.\nStudent Name: ${guardData.candidate_name}`;\n\nreturn [{ json: {\n  systemPrompt,\n  geminiHistory,\n  message: guardData.message,\n  p_key: guardData.p_key,\n  session_key: guardData.session_key,\n  candidate_name: guardData.candidate_name,\n  group_id: guardData.group_id\n} }];"
+        "jsCode": "const guardData   = $('Injection Guard').first().json;\nconst ragData     = $('Fetch RAG Chunks').first().json;\nconst sessionArr  = $('Fetch Session History').first().json;\n\nconst sessionRow  = Array.isArray(sessionArr) ? (sessionArr[0] || {}) : sessionArr;\n\n// Build context from RAG chunks instead of full codebase\nconst chunks = ragData.chunks || [];\nlet contextBlock = 'No relevant code found for this question.';\nif (chunks.length > 0) {\n  contextBlock = chunks.map(c => `--- ${c.filename} ---\\n${c.snippet}`).join('\\n\\n');\n}\n\nlet messages = [];\ntry {\n  messages = typeof sessionRow.messages === 'string'\n    ? JSON.parse(sessionRow.messages)\n    : (sessionRow.messages || []);\n} catch(e) { messages = []; }\n\nconst recentMessages = messages.slice(-10);\n\n// Inject RAG-retrieved chunks as first dynamic turn — NOT in systemPrompt\nconst geminiHistory = [\n  { role: 'user', parts: [{ text: 'Here are the relevant code sections from the project (retrieved via RAG):\\n---\\n' + contextBlock + '\\n---' }] },\n  { role: 'model', parts: [{ text: 'Understood. I have the relevant code sections. I will use them to guide the student without revealing the code directly.' }] },\n  ...recentMessages.map(m => ({\n    role: m.role === 'assistant' ? 'model' : 'user',\n    parts: [{ text: m.content || '' }]\n  }))\n];\ngeminiHistory.push({ role: 'user', parts: [{ text: guardData.message }] });\n\nconst systemPrompt = `You are a Socratic AI coding tutor. The student is debugging their code.\\n\\nYOUR RULES — STRICT COMPLIANCE REQUIRED:\\n1. NEVER write code, pseudocode, or direct logic that solves the problem.\\n2. NEVER reveal the bug, the fix, or which exact line number is wrong.\\n3. If the student pastes the correct code and asks \\\"Is this right?\\\", reply: \\\"Test it and trace the output. What does it return?\\\" (Never confirm the answer).\\n4. Guide ONLY through open questions (e.g., \\\"What do you think happens when...\\\", \\\"Trace the value of X here.\\\").\\n5. Be concise: Maximum 3 sentences.\\n6. NEVER quote the reference codebase directly.\\nStudent Name: ${guardData.candidate_name}`;\n\nreturn [{ json: {\n  systemPrompt,\n  geminiHistory,\n  message: guardData.message,\n  p_key: guardData.p_key,\n  session_key: guardData.session_key,\n  candidate_name: guardData.candidate_name,\n  group_id: guardData.group_id\n} }];"
       },
       "id": "1c2e7f1b-0c5e-4d7e-bc52-db78fe028565",
       "name": "Merge + Build Context",
@@ -193,7 +202,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json;\nconst reply = raw?.candidates?.[0]?.content?.parts?.[0]?.text?.trim()\n  || 'I had trouble forming a response. Could you rephrase?';\nconst ctx = $('Merge + Build Context').first().json;\nreturn [{ json: {\n  reply,\n  message:        ctx.message,\n  p_key:          ctx.p_key,\n  session_key:    ctx.session_key,\n  candidate_name: ctx.candidate_name,\n  group_id:       ctx.group_id\n} }];"
+        "jsCode": "const raw = $input.first().json;\nconst reply = raw?.candidates?.[0]?.content?.parts?.[0]?.text?.trim()\n  || 'I had trouble forming a response. Could you rephrase?';\nconst ctx = $('Merge + Build Context').first().json;\n\n// Cite which student-facing files grounded the answer. FastAPI already maps\n// solution/... -> the student's own filename, and sends no snippet text,\n// so nothing here can leak the reference solution.\nconst ragChunks = $('Fetch RAG Chunks').first().json?.chunks || [];\nconst sources = [...new Set(ragChunks.map(c => c.filename).filter(Boolean))]\n  .map(filename => ({ filename }));\n\nreturn [{ json: {\n  reply,\n  sources,\n  message:        ctx.message,\n  p_key:          ctx.p_key,\n  session_key:    ctx.session_key,\n  candidate_name: ctx.candidate_name,\n  group_id:       ctx.group_id\n} }];"
       },
       "id": "b1a0947f-fb79-4a92-ba53-28ccba5ddded",
       "name": "Extract Tutor Reply",
@@ -207,7 +216,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ reply: $json.reply }) }}",
+        "responseBody": "={{ JSON.stringify({ reply: $json.reply, sources: $json.sources || [] }) }}",
         "options": {
           "responseCode": 200
         }
@@ -461,7 +470,8 @@
     },
     {
       "parameters": {
-        "amount": 1
+        "amount": 5,
+        "unit": "seconds"
       },
       "id": "c6a78d6b-8d29-4f23-b818-43e025016e86",
       "name": "Wait: Eval Deferred",
@@ -508,14 +518,14 @@
         ],
         [
           {
-            "node": "Fetch Codebase",
+            "node": "Fetch RAG Chunks",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Fetch Codebase": {
+    "Fetch RAG Chunks": {
       "main": [
         [
           {

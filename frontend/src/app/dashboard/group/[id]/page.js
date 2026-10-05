@@ -38,6 +38,21 @@ function getLangOptionsForCategory(category) {
   }
 }
 function getFileIcon(lang) { return FILE_ICONS[lang?.toLowerCase()] || '📄'; }
+// The evaluator weights all six metrics equally, so the headline figure is
+// their plain mean. Returns null when no metrics have been recorded yet.
+function overallEma(emaScores) {
+  const values = Object.values(emaScores || {}).map(Number).filter(Number.isFinite);
+  if (!values.length) return null;
+  return values.reduce((a, b) => a + b, 0) / values.length;
+}
+
+function scoreBand(value) {
+  if (value >= 8) return { label: 'Excellent', color: 'var(--accent-green)' };
+  if (value >= 6) return { label: 'Strong', color: 'var(--accent-blue)' };
+  if (value >= 4) return { label: 'Developing', color: '#e0a33e' };
+  return { label: 'Needs Support', color: '#e06c75' };
+}
+
 function getBasename(path) { return path.split('/').pop(); }
 function getDirname(path) { const parts = path.split('/'); parts.pop(); return parts.join('/'); }
 
@@ -470,6 +485,7 @@ export default function GroupDetailPage({ params }) {
   const [memberVersion, setMemberVersion] = useState(null);
   const [copied, setCopied] = useState(false);
   const [clientScores, setClientScores] = useState({});
+  const lastMemberContentRef = useRef(null);
 
   // Hidden files
   const [showHidden, setShowHidden] = useState(true);
@@ -567,6 +583,51 @@ export default function GroupDetailPage({ params }) {
     });
   }
 
+  // Neither the student's score nor their file fork pushes to this page: scores
+  // are written by n8n out-of-band, and a fork is saved from the student's own
+  // browser. Both are therefore polled while the panel showing them is open.
+  const fetchScores = useCallback(async (memberId, username) => {
+    if (!group?.group_code) return;
+    try {
+      const res = await fetch(`/api/scores?group_id=${encodeURIComponent(group.group_code)}&candidate_name=${encodeURIComponent(username)}`);
+      const data = await res.json();
+      setClientScores(prev => ({ ...prev, [memberId]: data }));
+    } catch (err) {
+      console.error("Failed to fetch scores:", err);
+      setClientScores(prev => ({ ...prev, [memberId]: { found: false, error: err.message } }));
+    }
+  }, [group]);
+
+  // Poll scores while a client's overview is open.
+  useEffect(() => {
+    if (viewMode !== 'client_overview' || !selectedMemberId) return;
+    const member = members.find(m => m.id === selectedMemberId);
+    if (!member) return;
+    const tick = () => fetchScores(member.id, member.username);
+    const id = setInterval(tick, 15000);
+    window.addEventListener('focus', tick);
+    return () => { clearInterval(id); window.removeEventListener('focus', tick); };
+  }, [viewMode, selectedMemberId, members, fetchScores]);
+
+  // Poll the member's fork while the admin has it open (it is read-only here,
+  // so replacing the buffer cannot clobber anything the admin typed).
+  useEffect(() => {
+    if (viewMode !== 'member' || !selectedMemberId || !selectedFileId) return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const version = await api.getMemberVersion(groupId, selectedFileId, selectedMemberId);
+        if (cancelled || version.content === lastMemberContentRef.current) return;
+        lastMemberContentRef.current = version.content;
+        setMemberVersion(version);
+        setEditorContent(version.content);
+      } catch { /* keep showing the last good version */ }
+    };
+    const id = setInterval(refresh, 5000);
+    window.addEventListener('focus', refresh);
+    return () => { cancelled = true; clearInterval(id); window.removeEventListener('focus', refresh); };
+  }, [viewMode, selectedMemberId, selectedFileId, groupId]);
+
   async function selectMember(member) {
     setSelectedMemberId(member.id);
     setViewMode('client_overview');
@@ -574,17 +635,9 @@ export default function GroupDetailPage({ params }) {
     setMemberVersion(null);
     setEditorContent('');
 
-    // Fetch scores from n8n through our API proxy — use group_code as the stable unique key
-    if (!clientScores[member.id]) {
-      try {
-        const res = await fetch(`/api/scores?group_id=${encodeURIComponent(group.group_code)}&candidate_name=${encodeURIComponent(member.username)}`);
-        const data = await res.json();
-        setClientScores(prev => ({ ...prev, [member.id]: data }));
-      } catch (err) {
-        console.error("Failed to fetch scores:", err);
-        setClientScores(prev => ({ ...prev, [member.id]: { found: false, error: err.message } }));
-      }
-    }
+    // Always refetch. Scores are written by n8n's deferred evaluator seconds
+    // after the student's message, so a cached "not found" would stick forever.
+    fetchScores(member.id, member.username);
   }
 
   async function openMemberFile(member, file) {
@@ -599,6 +652,7 @@ export default function GroupDetailPage({ params }) {
 
     try {
       const version = await api.getMemberVersion(groupId, file.id, member.id);
+      lastMemberContentRef.current = version.content;
       setMemberVersion(version);
       setEditorContent(version.content);
     } catch {
@@ -760,9 +814,11 @@ export default function GroupDetailPage({ params }) {
   return (
     <>
       <Navbar />
-      <div className="page-wrapper" style={{ paddingTop: 90 }}>
+      {/* Column that fills exactly one viewport, so the editor claims every
+          pixel the header does not use instead of a hardcoded 160px guess. */}
+      <div className="page-wrapper" style={{ paddingTop: 78, height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {/* Workspace header */}
-        <div className="workspace-header" style={{ padding: '8px 16px' }}>
+        <div className="workspace-header" style={{ padding: '6px 16px', marginBottom: 8, flexShrink: 0 }}>
           <div className="workspace-header-left">
             <Link href="/dashboard" className="btn btn-ghost btn-sm" style={{ padding: '4px 10px', fontSize: '0.82rem' }}>← Back</Link>
             <h1 style={{ fontSize: '1.2rem' }}>{group.name}</h1>
@@ -783,7 +839,9 @@ export default function GroupDetailPage({ params }) {
         </div>
 
         {/* IDE Layout */}
-        <div className="ide-layout" id="ide-layout" style={{ height: 'calc(100vh - 160px)', margin: '0 20px 20px' }}>
+        {/* height:auto neutralises the calc(100vh - 200px) that globals.css
+            still sets on .ide-layout; the flex parent supplies the height. */}
+        <div className="ide-layout" id="ide-layout" style={{ flex: 1, minHeight: 0, height: 'auto', margin: '0 16px 12px' }}>
           {/* Activity Bar */}
           <div className="ide-activity-bar">
             <button className={`ide-activity-btn ${activePanel === 'explorer' ? 'active' : ''}`}
@@ -991,7 +1049,7 @@ export default function GroupDetailPage({ params }) {
                     </div>
                     <div className="client-profile-card">
                       <div className="label">Joined</div>
-                      <div className="value">{new Date(selectedMember.created_at).toLocaleDateString()}</div>
+                      <div className="value">{selectedMember.joined_at ? new Date(selectedMember.joined_at).toLocaleDateString() : '—'}</div>
                     </div>
                   </div>
 
@@ -1013,6 +1071,27 @@ export default function GroupDetailPage({ params }) {
                               </div>
                             </div>
                           </div>
+
+                          {(() => {
+                            const overall = overallEma(clientScores[selectedMember.id].current_ema_scores);
+                            if (overall === null) return null;
+                            const band = scoreBand(overall);
+                            return (
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap', background: 'rgba(0,0,0,0.28)', border: `1px solid ${band.color}55`, borderRadius: 'var(--radius-md)', padding: '20px 24px', marginBottom: 20 }}>
+                                <div>
+                                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>Overall Score</div>
+                                  <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Mean of all six EMA metrics</div>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12 }}>
+                                  <span style={{ fontSize: '3.6rem', fontWeight: 900, lineHeight: 0.9, color: band.color }}>{overall.toFixed(1)}</span>
+                                  <div style={{ paddingBottom: 6 }}>
+                                    <div style={{ fontSize: '1rem', color: 'var(--text-muted)' }}>/ 10</div>
+                                    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: band.color, textTransform: 'uppercase', letterSpacing: 0.5 }}>{band.label}</div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })()}
 
                           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 16 }}>
                             {Object.entries(clientScores[selectedMember.id].current_ema_scores || {}).map(([metric, score]) => (
@@ -1096,7 +1175,7 @@ export default function GroupDetailPage({ params }) {
 
                       {isAdmin && viewMode === 'template' && (
                         <button
-                          className={`ide-activity-btn ${selectedFile.is_readonly ? 'active' : ''}`}
+                          className={`ide-toolbar-chip ${selectedFile.is_readonly ? 'active' : ''}`}
                           onClick={async () => {
                             try {
                               await api.updateFile(groupId, selectedFile.id, { is_readonly: !selectedFile.is_readonly });
@@ -1106,7 +1185,6 @@ export default function GroupDetailPage({ params }) {
                             }
                           }}
                           title="Toggle Read-Only for Clients"
-                          style={{ padding: '2px 6px', fontSize: '0.9rem', height: 'auto', border: selectedFile.is_readonly ? '1px solid var(--accent-warning)' : '1px solid rgba(255,255,255,0.1)' }}
                         >
                           {selectedFile.is_readonly ? '🔒 Locked' : '🔓 Unlocked'}
                         </button>
@@ -1138,19 +1216,27 @@ export default function GroupDetailPage({ params }) {
                           <>▶ Run Tests</>
                         )}
                       </button>
-                      {showTerminal && (
-                        <button
-                          onClick={() => setShowTerminal(false)}
-                          title="Hide Terminal"
-                          style={{
-                            padding: '3px 8px', fontSize: '0.75rem',
-                            border: '1px solid var(--border-subtle)', borderRadius: '4px',
-                            background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer',
-                          }}
-                        >
-                          ✕ Terminal
-                        </button>
-                      )}
+                      {/* Persistent toggle. This used to render only while the
+                          terminal was open, so closing it left no way back except
+                          re-running the tests — even though testResults is still
+                          in state and the output was never lost. */}
+                      <button
+                        className="ide-toolbar-chip"
+                        onClick={() => setShowTerminal(v => !v)}
+                        title={showTerminal ? 'Hide terminal' : (testResults ? 'Show last test results' : 'Show terminal')}
+                      >
+                        {showTerminal ? '✕' : '▤'} Terminal
+                        {!showTerminal && testResults && (
+                          <span
+                            aria-hidden="true"
+                            style={{
+                              width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                              background: (testResults?.backend_tests?.status === 'passed' && testResults?.frontend_tests?.status === 'passed')
+                                ? '#4caf50' : '#f44336',
+                            }}
+                          />
+                        )}
+                      </button>
                       {canEdit && viewMode === 'template' && (
                         <div className={`ide-save-dot ${saveStatus}`}>
                           {saveStatus === 'saved' && '✓ Saved'}
@@ -1377,8 +1463,8 @@ export default function GroupDetailPage({ params }) {
             {showTutorChat && (
               <div style={{ flex: 3, minWidth: 320, borderLeft: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', overflow: 'hidden', height: '100%', minHeight: 0 }}>
                 <TutorChat
-                  groupId={group.group_code}
-                  candidateName={user?.username || 'Anonymous'}
+                  groupCode={group.group_code}
+                  username={user?.username || 'Anonymous'}
                 />
               </div>
             )}

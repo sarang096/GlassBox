@@ -554,3 +554,48 @@
     min-width: unset;
   }
 }
+
+/* ─── RAG Source Citations ─── */
+.eval-msg-sources {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.eval-msg-sources-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.eval-msg-source-item {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.eval-msg-source-file {
+  display: block;
+  font-weight: 600;
+  color: #6c9fff;
+  margin-bottom: 3px;
+  font-size: 11px;
+}
+
+.eval-msg-source-snippet {
+  display: block;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.55);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 60px;
+  overflow: hidden;
+  line-height: 1.4;
+}

@@ -47,7 +47,10 @@ class ApiClient {
       const response = await fetch(url, { 
         ...options, 
         headers,
-        credentials: 'omit'  // Don't send cookies since we're using Bearer tokens
+        credentials: 'omit',  // Don't send cookies since we're using Bearer tokens
+        // Authenticated JSON should never be served from the HTTP cache, and
+        // the admin's poll of a member's fork depends on always seeing live data.
+        cache: 'no-store'
       });
 
       // Handle 401 - Unauthorized (token expired or invalid)
@@ -336,6 +339,19 @@ class ApiClient {
     } finally {
       clearTimeout(timeoutId);
     }
+  }
+
+  // ─── RAG index management ───
+  // There is no chat method here: the AI tutor is the n8n workflow, reached
+  // through the Next.js proxy at /api/chat. FastAPI only owns the vectors.
+
+  async reindexChat(groupId) {
+    if (!Number.isInteger(groupId) || groupId <= 0) {
+      throw new Error('Invalid group ID');
+    }
+    return this.request(`/groups/${groupId}/rag/reindex`, {
+      method: 'POST',
+    });
   }
 }
 

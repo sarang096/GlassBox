@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 import logging
 from database import get_db
@@ -9,6 +9,8 @@ from schemas import (
     AiBulkImport, AiBulkFileItem
 )
 from auth import get_current_user
+from config import ADMIN_SECRET
+import rag
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/groups/{group_id}/files", tags=["Files"])
@@ -45,15 +47,29 @@ def _check_admin(user: User, group: Group):
         raise HTTPException(status_code=403, detail="Only the admin can do this")
 
 
-# ─── Bulk AI Import (called by N8N — no auth required) ───
+# ─── Bulk AI Import (called by N8N) ───
 
 @router.post("/ai-import", status_code=201)
-def ai_bulk_import(group_id: int, data: AiBulkImport, db: Session = Depends(get_db)):
+def ai_bulk_import(
+    group_id: int,
+    data: AiBulkImport,
+    request: Request,
+    db: Session = Depends(get_db),
+):
     """
     Bulk-create files from N8N AI generation.
-    No JWT auth — N8N calls this directly from Docker.
+
+    Service-to-service, so no JWT — but it must still be authenticated. This
+    endpoint writes files that are RAG-indexed and fed to the tutor, so an
+    open version of it lets anyone plant a `solution/` file and poison the
+    tutor's grounding. Same x-admin-key contract as /api/rag/retrieve.
     """
     try:
+        admin_key = request.headers.get("x-admin-key", "")
+        if not admin_key or admin_key != ADMIN_SECRET:
+            logger.warning(f"Rejected unauthenticated ai-import for group {group_id}")
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
         group = db.query(Group).filter(Group.id == group_id).first()
         if not group:
             raise HTTPException(status_code=404, detail="Group not found")
@@ -84,6 +100,12 @@ def ai_bulk_import(group_id: int, data: AiBulkImport, db: Session = Depends(get_
             db.add(gf)
             db.commit()
             db.refresh(gf)
+
+            # RAG: index the new file
+            try:
+                rag.index_file(group.id, gf.id, gf.filename, content)
+            except Exception as e:
+                logger.warning(f"RAG index failed for AI-imported file {gf.id}: {e}")
 
             # Auto-create member versions for non-hidden files
             if not gf.is_hidden:
@@ -155,6 +177,12 @@ def create_file(group_id: int, data: FileCreate, current_user: User = Depends(ge
         db.add(gf)
         db.commit()
         db.refresh(gf)
+
+        # RAG: index the new file
+        try:
+            rag.index_file(group.id, gf.id, gf.filename, content)
+        except Exception as e:
+            logger.warning(f"RAG index failed for file {gf.id}: {e}")
 
         # Auto-create a version for EVERY existing member (except admin)
         # But NOT for hidden files — those are admin-only
@@ -256,7 +284,14 @@ def update_file(group_id: int, file_id: int, data: FileUpdate, current_user: Use
 
         db.commit()
         db.refresh(gf)
-        
+
+        # RAG: re-index if content changed
+        if data.content is not None:
+            try:
+                rag.index_file(group.id, gf.id, gf.filename, gf.content or "")
+            except Exception as e:
+                logger.warning(f"RAG re-index failed for file {gf.id}: {e}")
+
         logger.info(f"File updated: {gf.id} in group {group.id} by user {current_user.id}")
         return FileResponse.model_validate(gf)
     
@@ -276,6 +311,12 @@ def delete_file(group_id: int, file_id: int, current_user: User = Depends(get_cu
     gf = db.query(GroupFile).filter(GroupFile.id == file_id, GroupFile.group_id == group_id).first()
     if not gf:
         raise HTTPException(status_code=404, detail="File not found")
+
+    # RAG: remove indexed chunks before deleting
+    try:
+        rag.remove_file(group_id, gf.id)
+    except Exception as e:
+        logger.warning(f"RAG remove failed for file {gf.id}: {e}")
 
     db.delete(gf)
     db.commit()
