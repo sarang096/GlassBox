@@ -5,8 +5,10 @@ import CodeEditor from "@/components/CodeEditor";
 import TutorChat from "@/components/TutorChat";
 
 // ── Hardcoded test values ──
-const GROUP_ID = "test_group_01";
-const CANDIDATE_NAME = "Sarang";
+// n8n keys sessions and scores on the group_code, so this must be a code
+// (from the groups table), not the numeric id.
+const GROUP_CODE = "JYE7LZEO";
+const USERNAME = "Sarang";
 
 export default function EvaluatePage() {
   return (
@@ -15,7 +17,7 @@ export default function EvaluatePage() {
       <CodeEditor />
 
       {/* Right Panel: AI Tutor Chat — 30% */}
-      <TutorChat groupId={GROUP_ID} candidateName={CANDIDATE_NAME} />
+      <TutorChat groupCode={GROUP_CODE} username={USERNAME} />
     </main>
   );
 }

@@ -169,3 +169,20 @@ class MemberVersionUpdate(BaseModel):
 class FileWithVersionsResponse(FileResponse):
     """Admin view: file with all member versions."""
     versions: List[MemberVersionResponse] = []
+
+
+# ─── RAG Retrieve Schemas (for n8n service-to-service calls) ───
+class RagRetrieveRequest(BaseModel):
+    group_id: str  # Can be numeric ID or group_code string
+    question: str
+    top_k: Optional[int] = None
+
+
+class RagChunk(BaseModel):
+    filename: str
+    snippet: str
+
+
+class RagRetrieveResponse(BaseModel):
+    chunks: List[RagChunk] = []
+    chunk_count: int = 0

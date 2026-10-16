@@ -7,6 +7,7 @@ from routes.auth_routes import router as auth_router
 from routes.group_routes import router as group_router
 from routes.file_routes import router as file_router
 from routes.execution_routes import router as execution_router
+from routes.rag_routes import router as rag_group_router, rag_router
 from config import CORS_ORIGINS, LOG_LEVEL
 
 # Configure logging
@@ -49,6 +50,8 @@ app.include_router(auth_router)
 app.include_router(group_router)
 app.include_router(file_router)
 app.include_router(execution_router)
+app.include_router(rag_group_router)
+app.include_router(rag_router)
 
 
 @app.get("/")

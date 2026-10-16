@@ -35,3 +35,17 @@ RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "60"))  # seconds
 
 # Logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+# RAG vector store. The AI tutor itself lives in n8n (ai_Eval.json);
+# FastAPI only embeds and retrieves, so no chat model is configured here.
+GEMINI_KEY = os.getenv("GEMINI_KEY", "")
+CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "./chroma_data")
+RAG_CHUNK_SIZE = int(os.getenv("RAG_CHUNK_SIZE", "1200"))
+# Unused by the code-aware chunker (overlap is line-based there); kept so an
+# existing .env setting does not break startup.
+RAG_CHUNK_OVERLAP = int(os.getenv("RAG_CHUNK_OVERLAP", "100"))
+RAG_TOP_K = int(os.getenv("RAG_TOP_K", "5"))
+GEMINI_EMBED_MODEL = os.getenv("GEMINI_EMBED_MODEL", "gemini-embedding-001")
+
+# n8n service-to-service auth key (same key used in n8n's ADMIN_SECRET env var)
+ADMIN_SECRET = os.getenv("ADMIN_SECRET", "change-me")

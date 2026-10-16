@@ -259,12 +259,14 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   background: var(--bg-primary);
   position: relative;
 }
 
 /* Tabs */
 .ide-tabs-v2 {
+  flex-shrink: 0;
   display: flex;
   background: rgba(10, 10, 26, 0.5);
   border-bottom: 1px solid var(--border-subtle);
@@ -329,19 +331,67 @@
 
 .ide-toolbar-v2 {
   display: flex; align-items: center; justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
   padding: 8px 20px;
   border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+/* The two halves were unstyled block divs, so their children stacked instead
+   of sitting in a row. */
+.ide-toolbar-left,
+.ide-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* Auto-width chip for toolbar controls. .ide-activity-btn must not be reused
+   here: it is a fixed 50x48 icon tile for the activity rail, which squashes
+   any text label onto two lines. */
+.ide-toolbar-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  height: 26px;
+  padding: 0 10px;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.ide-toolbar-chip:hover {
+  color: var(--text-bright);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.ide-toolbar-chip.active {
+  border-color: var(--accent-warning);
+  color: var(--accent-warning);
 }
 
 .ide-lang-badge {
   padding: 4px 10px; background: rgba(255, 255, 255, 0.08); border-radius: var(--radius-sm);
   font-weight: 600; font-size: 0.75rem; color: var(--text-primary);
   border: 1px solid var(--border-subtle);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* Editor Wrapper */
 .ide-editor-wrap {
   flex: 1;
+  min-height: 0;
   display: flex;
   overflow: hidden;
   position: relative;

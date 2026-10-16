@@ -1380,6 +1380,7 @@ h1, h2, h3, h4, h5, h6 {
 /* Editor Content */
 .ide-editor-wrap {
   flex: 1;
+  min-height: 0;
   display: flex;
   overflow: hidden;
   position: relative;

@@ -19,7 +19,10 @@
       "position": [
         10400,
         304
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -39,7 +42,10 @@
       "position": [
         10848,
         304
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -59,7 +65,10 @@
       "position": [
         11296,
         304
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -79,11 +88,14 @@
       "position": [
         11744,
         304
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
-        "jsCode": "const raw = ($input.first().json.candidates?.[0]?.content?.parts?.[0]?.text) || '';\nconst prev = $('Parse Validated Backend1').first().json;\nlet buggyCode = raw.replace(/^```[\\w]*\\s*\\n?/gm, '').replace(/^```\\s*$/gm, '').trim();\nif (!buggyCode || buggyCode.length < 100) buggyCode = prev.backend_fixed;\n// backend.code = buggy (student sees this), backend_solution.code = correct (for tests)\nreturn [{ json: { ...prev, backend: { ...prev.backend, code: buggyCode } } }];"
+        "jsCode": "const raw = ($input.first().json.candidates?.[0]?.content?.parts?.[0]?.text) || '';\nconst prev = $('Parse Validated Backend1').first().json;\nlet buggyCode = raw.replace(/^```[\\w]*\\s*\\n?/gm, '').replace(/^```\\s*$/gm, '').trim();\n\n// The whole product depends on the student's copy differing from the solution.\n// The old fallback silently substituted the CORRECT code here, shipping a\n// bug-free \"debugging\" assignment that still reported success. Fail loudly\n// instead — a failed run is visible, a bug-free run is not.\nconst norm = s => String(s || '').replace(/\\s+/g, ' ').trim();\n\nif (!buggyCode || buggyCode.length < 100) {\n  throw new Error(`Phase 2c: bug injection returned no usable backend code (${buggyCode.length} chars). Re-run generation.`);\n}\nif (norm(buggyCode) === norm(prev.backend_fixed)) {\n  throw new Error('Phase 2c: injected backend code is identical to the solution — the student would get a bug-free assignment. Re-run generation.');\n}\n\n// backend.code = buggy (student sees this), backend_solution.code = correct (for tests)\nreturn [{ json: { ...prev, backend: { ...prev.backend, code: buggyCode } } }];"
       },
       "id": "0d069139-cd76-43ea-9614-9faf3123e20f",
       "name": "Parse Backend Bugs",
@@ -112,7 +124,10 @@
       "position": [
         12192,
         304
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -132,11 +147,14 @@
       "position": [
         12640,
         304
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
-        "jsCode": "const raw = ($input.first().json.candidates?.[0]?.content?.parts?.[0]?.text) || '';\nconst prev = $('Parse Frontend Output1').first().json;\nlet buggyCode = raw.replace(/^\\`\\`\\`[\\w]*\\s*\\n?/gm, '').replace(/^\\`\\`\\`\\s*$/gm, '').trim();\nif (!buggyCode || buggyCode.length < 100) buggyCode = prev.frontend_solution?.code || prev.frontend.code;\nreturn [{ json: { ...prev, frontend: { ...prev.frontend, code: buggyCode } } }];"
+        "jsCode": "const raw = ($input.first().json.candidates?.[0]?.content?.parts?.[0]?.text) || '';\nconst prev = $('Parse Frontend Output1').first().json;\nlet buggyCode = raw.replace(/^```[\\w]*\\s*\\n?/gm, '').replace(/^```\\s*$/gm, '').trim();\n\n// The whole product depends on the student's copy differing from the solution.\n// The old fallback silently substituted the CORRECT code here, shipping a\n// bug-free \"debugging\" assignment that still reported success. Fail loudly\n// instead — a failed run is visible, a bug-free run is not.\nconst norm = s => String(s || '').replace(/\\s+/g, ' ').trim();\n\nconst solution = prev.frontend_solution?.code || prev.frontend.code;\nif (!buggyCode || buggyCode.length < 100) {\n  throw new Error(`Phase 3b: bug injection returned no usable frontend code (${buggyCode.length} chars). Re-run generation.`);\n}\nif (norm(buggyCode) === norm(solution)) {\n  throw new Error('Phase 3b: injected frontend code is identical to the solution — the student would get a bug-free assignment. Re-run generation.');\n}\n\nreturn [{ json: { ...prev, frontend: { ...prev.frontend, code: buggyCode } } }];"
       },
       "id": "0c5bbf71-fbc2-40ff-9986-0c3ce2851b77",
       "name": "Parse Frontend Bugs",
@@ -165,7 +183,10 @@
       "position": [
         13088,
         304
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -185,7 +206,10 @@
       "position": [
         13536,
         304
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -205,7 +229,10 @@
       "position": [
         13984,
         304
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -355,6 +382,10 @@
             {
               "name": "Content-Type",
               "value": "application/json"
+            },
+            {
+              "name": "x-admin-key",
+              "value": "={{ $env.ADMIN_SECRET }}"
             }
           ]
         },

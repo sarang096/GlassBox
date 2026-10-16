@@ -6,13 +6,21 @@ const INITIAL_MESSAGES = [
   {
     role: "assistant",
     content:
-      "Hello! I'm your AI Tutor. I can see the code in your editor. Tell me what you notice about it — what do you think it's supposed to do, and what happens when you trace through it?",
+      "Hello! I'm your AI Tutor. I can answer questions about your group's code and files. Ask me anything — what does a function do, how does a piece of code work, or where a feature is implemented!",
     time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    sources: [],
   },
 ];
 
-export default function TutorChat({ groupId, candidateName }) {
-  const storageKey = `chat_session_${groupId}_${candidateName.toLowerCase().replace(/[^a-z0-9_]/g, '')}`;
+// The AI tutor is the n8n workflow (ai_Eval.json), reached through the
+// Next.js proxy at /api/chat. FastAPI has no chat endpoint — it only serves
+// RAG retrieval to n8n.
+//
+// `groupCode` (not the numeric id) is what n8n keys sessions and scores on:
+// its Injection Guard builds p_key as `{group_id}_{candidate_name}`, and the
+// admin score lookup reads back with group_code. They must match.
+export default function TutorChat({ groupCode, username }) {
+  const storageKey = `rag_chat_${groupCode}`;
 
   const [messages, setMessages] = useState(() => {
     if (typeof window !== "undefined") {
@@ -27,32 +35,13 @@ export default function TutorChat({ groupId, candidateName }) {
     }
     return INITIAL_MESSAGES;
   });
-  
-  const [input, setInput] = useState("");
 
-  // On mount: check if the server session was reset (turn_count === 0).
-  // If so, wipe stale localStorage so the UI matches the backend.
-  useEffect(() => {
-    async function syncWithServer() {
-      try {
-        const res = await fetch(
-          `/api/scores?group_id=${encodeURIComponent(groupId)}&candidate_name=${encodeURIComponent(candidateName)}`
-        );
-        if (!res.ok) return;
-        const data = await res.json();
-        // Server has no turns (new challenge) but localStorage has old messages → clear it
-        if (!data.found || data.turn_count === 0) {
-          localStorage.removeItem(storageKey);
-          setMessages(INITIAL_MESSAGES);
-        }
-      } catch (e) {
-        // Silently ignore — don't block the chat on a failed sync
-        console.warn("[TutorChat] Could not sync session state:", e);
-      }
-    }
-    syncWithServer();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groupId, candidateName]);
+  const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const messagesEndRef = useRef(null);
+  const inputRef = useRef(null);
+  const messagesContainerRef = useRef(null);
+  const isUserScrolledUp = useRef(false);
 
   // Persist to localStorage whenever messages change
   useEffect(() => {
@@ -60,13 +49,6 @@ export default function TutorChat({ groupId, candidateName }) {
       localStorage.setItem(storageKey, JSON.stringify(messages));
     }
   }, [messages, storageKey]);
-
-  const [isLoading, setIsLoading] = useState(false);
-  const messagesEndRef = useRef(null);
-  const inputRef = useRef(null);
-  const messagesContainerRef = useRef(null);
-  // Track whether the user has manually scrolled up
-  const isUserScrolledUp = useRef(false);
 
   // Resize textarea to fit its content (up to CSS max-height)
   const resizeTextarea = useCallback(() => {
@@ -117,6 +99,11 @@ export default function TutorChat({ groupId, candidateName }) {
     }
   };
 
+  const handleClearChat = () => {
+    setMessages(INITIAL_MESSAGES);
+    localStorage.removeItem(storageKey);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     const trimmed = input.trim();
@@ -125,7 +112,7 @@ export default function TutorChat({ groupId, candidateName }) {
     const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
     // 1. Optimistically render user message
-    const userMsg = { role: "user", content: trimmed, time: now };
+    const userMsg = { role: "user", content: trimmed, time: now, sources: [] };
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     // Reset textarea height after clearing
@@ -137,20 +124,23 @@ export default function TutorChat({ groupId, candidateName }) {
     setIsLoading(true);
 
     try {
-      // 2. Call our proxy API
+      // 2. Ask the n8n tutor via the Next.js proxy. n8n runs the injection
+      //    guard, pulls RAG context, answers, and scores the prompt.
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          group_id: groupId,
-          candidate_name: candidateName,
+          group_id: groupCode,
+          candidate_name: username || "Anonymous",
           message: trimmed,
         }),
       });
 
-      const data = await res.json();
+      // The proxy always returns a JSON body carrying a `reply`, including on
+      // its 5xx paths, so render whatever came back rather than throwing.
+      const data = await res.json().catch(() => ({}));
 
-      // 3. Append assistant reply
+      // 3. Append assistant reply with sources
       const replyTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
       setMessages((prev) => [
         ...prev,
@@ -158,6 +148,8 @@ export default function TutorChat({ groupId, candidateName }) {
           role: "assistant",
           content: data.reply || "I couldn't form a response. Could you rephrase?",
           time: replyTime,
+          sources: data.sources || [],
+          flagged: data.flagged === true,
         },
       ]);
     } catch (err) {
@@ -166,8 +158,9 @@ export default function TutorChat({ groupId, candidateName }) {
         ...prev,
         {
           role: "assistant",
-          content: "I'm having trouble connecting. Please check your network and try again.",
+          content: "I'm having trouble reaching the AI Tutor. Check that n8n is running, then try again.",
           time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          sources: [],
         },
       ]);
     } finally {
@@ -183,12 +176,38 @@ export default function TutorChat({ groupId, candidateName }) {
       <div className="eval-chat-header">
         <div className="eval-chat-avatar">🤖</div>
         <div className="eval-chat-header-info">
-          <div className="eval-chat-title">AI Socratic Tutor</div>
+          <div className="eval-chat-title">AI Tutor</div>
           <div className="eval-chat-subtitle">
             <span className="eval-online-dot" />
-            Powered by Gemini &middot; Guided Mode
+            RAG-Powered &middot; Knows Your Code
           </div>
         </div>
+        <button
+          className="eval-chat-clear-btn"
+          onClick={handleClearChat}
+          title="Clear chat history"
+          style={{
+            marginLeft: 'auto',
+            background: 'none',
+            border: '1px solid rgba(255,255,255,0.15)',
+            borderRadius: 6,
+            color: 'rgba(255,255,255,0.5)',
+            cursor: 'pointer',
+            padding: '4px 10px',
+            fontSize: 12,
+            transition: 'all 0.2s',
+          }}
+          onMouseEnter={(e) => {
+            e.target.style.color = 'rgba(255,255,255,0.9)';
+            e.target.style.borderColor = 'rgba(255,255,255,0.3)';
+          }}
+          onMouseLeave={(e) => {
+            e.target.style.color = 'rgba(255,255,255,0.5)';
+            e.target.style.borderColor = 'rgba(255,255,255,0.15)';
+          }}
+        >
+          🗑 Clear
+        </button>
       </div>
 
       {/* ── Messages ── */}
@@ -200,9 +219,27 @@ export default function TutorChat({ groupId, candidateName }) {
       >
         {messages.map((msg, i) => (
           <div key={i} className={`eval-msg ${msg.role}`}>
-            <div className="eval-msg-bubble">{msg.content}</div>
+            <div className="eval-msg-bubble">
+              {msg.content}
+              {/* Show source citations for assistant messages */}
+              {msg.role === "assistant" && msg.sources && msg.sources.length > 0 && (
+                <div className="eval-msg-sources">
+                  <div className="eval-msg-sources-label">📎 Related files:</div>
+                  {msg.sources.map((src, j) => (
+                    <div key={j} className="eval-msg-source-item">
+                      <span className="eval-msg-source-file">📄 {src.filename}</span>
+                      {/* Snippets are reference-solution text and are no longer
+                          sent by the API. Render only if one is ever present. */}
+                      {src.snippet ? (
+                        <code className="eval-msg-source-snippet">{src.snippet}</code>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="eval-msg-meta">
-              {msg.role === "assistant" ? "AI Tutor" : candidateName} &middot; {msg.time}
+              {msg.role === "assistant" ? "AI Tutor" : (username || "You")} &middot; {msg.time}
             </div>
           </div>
         ))}
@@ -229,7 +266,7 @@ export default function TutorChat({ groupId, candidateName }) {
             className="eval-chat-input"
             id="chat-input"
             rows={1}
-            placeholder={isLoading ? "Waiting for response..." : "How can I help you?"}
+            placeholder={isLoading ? "Thinking..." : "Ask about your code..."}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
